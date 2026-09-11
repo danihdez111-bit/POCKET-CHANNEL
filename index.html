@@ -208,7 +208,8 @@
   /* recortador de audio */
   .trimbar{position:relative; height:56px; border-radius:12px; background:var(--surface-2); border:1px solid var(--line);
     margin:6px 0 8px; touch-action:none; overflow:hidden; user-select:none}
-  .trim-sel{position:absolute; top:0; bottom:0; background:var(--accent-soft); border-left:2px solid var(--accent); border-right:2px solid var(--accent)}
+  .trimbar canvas{position:absolute; inset:0; width:100%; height:100%; z-index:0}
+  .trim-sel{position:absolute; top:0; bottom:0; z-index:1; background:rgba(232,163,61,.16); border-left:2px solid var(--accent); border-right:2px solid var(--accent)}
   .trim-h{position:absolute; top:0; bottom:0; width:26px; margin-left:-13px; display:flex; align-items:center; justify-content:center;
     cursor:ew-resize; touch-action:none; z-index:2}
   .trim-h::before{content:""; width:5px; height:64%; border-radius:3px; background:var(--accent); box-shadow:0 0 0 3px var(--ground)}
@@ -575,35 +576,54 @@ function stopMetro(){ metro.running=false; clearTimeout(metro.timer); metro.time
   const dots=$('#beatDots').children; for(const d of dots) d.classList.remove('hit','one'); }
 
 /* ---------- reproducción de capas ---------- */
-let activeAudios=[];
-function fadeVol(a, from, to, ms){ const steps=10, dt=Math.max(4,ms/steps); let i=0; a.volume=Math.max(0,Math.min(1,from));
-  clearInterval(a._fade); a._fade=setInterval(()=>{ i++; const v=from+(to-from)*(i/steps); a.volume=Math.max(0,Math.min(1,v)); if(i>=steps){ clearInterval(a._fade); a._fade=null; } }, dt); }
+let activeNodes=[];        // fuentes Web Audio en curso
+let playToken=0;
 function layerTrim(l){ const full=l.dur||0; const ts=Math.max(0,l.trimStart||0); let te=(l.trimEnd!=null?l.trimEnd:full);
   if(!(te>ts)) te=full; const trimmed=(ts>0)||(l.trimEnd!=null); return {ts,te,full,trimmed,region:(te>ts?te-ts:full)}; }
-function playLayers(layers, onEndAll){
-  stopLayers(); let ended=0; const total=layers.length;
+function trimFor(l, fullDur){ const full=fullDur||l.dur||0; const ts=Math.max(0,Math.min(l.trimStart||0, full));
+  let te=(l.trimEnd!=null?l.trimEnd:full); te=Math.min(Math.max(te,ts),full);
+  const trimmed=((l.trimStart||0)>0)||(l.trimEnd!=null); return {ts:(te>ts?ts:0), region:(te>ts?te-ts:full), trimmed}; }
+async function ensureBuf(l){ if(l._buf) return l._buf; const ac=ctx(); const arr=await l.blob.arrayBuffer(); l._buf=await ac.decodeAudioData(arr); return l._buf; }
+async function playLayers(layers, onEndAll){
+  stopLayers();
+  const ac=ctx(); const total=layers.length;
   if(total===0){ if(onEndAll) onEndAll(); return; }
-  layers.forEach(l=>{
-    const url=URL.createObjectURL(l.blob); const a=new Audio(url); a._url=url; a._lid=l.id;
-    const target=(l.volume==null?1:l.volume);
-    const T=layerTrim(l);
-    let done=false;
-    function finish(){ if(done) return; done=true; clearInterval(a._fade); clearTimeout(a._fadeOutT); clearTimeout(a._endT);
-      try{a.pause();}catch(e){} ended++; if(onEndAll && ended>=total) onEndAll(); }
-    a.onended=finish;
-    function begin(){
-      try{ a.currentTime=T.ts; }catch(e){}
-      a.volume=0;                                       // fundido de entrada
-      a.play().then(()=>fadeVol(a,0,target,28)).catch(()=>{ a.volume=target; });
-      if(T.trimmed && T.region>0){ a._endT=setTimeout(finish, T.region*1000); }   // cortar en el fin del recorte
-      const foBase=T.trimmed? T.region : T.full;
-      if(foBase>0.25){ a._fadeOutT=setTimeout(()=>{ try{ fadeVol(a, a.volume, 0, 55); }catch(e){} }, Math.max(0,(foBase-0.07)*1000)); }
-    }
-    if(a.readyState>=1) begin(); else a.addEventListener('loadedmetadata', begin, {once:true});
-    activeAudios.push(a);
+  const myToken=playToken;
+  let bufs;
+  try{ bufs=await Promise.all(layers.map(l=>ensureBuf(l).then(b=>({l,b})).catch(()=>({l,b:null})))); }
+  catch(e){ if(onEndAll) onEndAll(); return; }
+  if(myToken!==playToken) return;                       // cancelado mientras descodificaba
+  let ended=0; const startT=ac.currentTime+0.04;
+  bufs.forEach(({l,b})=>{
+    if(!b){ ended++; if(ended>=total && onEndAll && myToken===playToken) onEndAll(); return; }
+    const T=trimFor(l, b.duration); const region=Math.max(0.02, T.region);
+    const src=ac.createBufferSource(); src.buffer=b;
+    const g=ac.createGain(); const target=(l.volume==null?1:l.volume);
+    const fin=Math.min(0.012, region/2), fout=Math.min(0.02, region/2);
+    g.gain.setValueAtTime(0.0001, startT);
+    g.gain.linearRampToValueAtTime(target, startT+fin);
+    g.gain.setValueAtTime(target, startT+Math.max(fin, region-fout));
+    g.gain.linearRampToValueAtTime(0.0001, startT+region);
+    src.connect(g).connect(ac.destination);
+    try{ src.start(startT, T.ts, region); }catch(e){ try{ src.start(startT); }catch(_){} }
+    src._g=g; src._lid=l.id;
+    src.onended=()=>{ ended++; if(onEndAll && ended>=total && myToken===playToken) onEndAll(); };
+    activeNodes.push(src);
   });
 }
-function stopLayers(){ activeAudios.forEach(a=>{ try{a.pause();}catch(e){} clearInterval(a._fade); clearTimeout(a._fadeOutT); clearTimeout(a._endT); if(a._url)URL.revokeObjectURL(a._url); }); activeAudios=[]; }
+function stopLayers(){
+  playToken++;
+  const ac=audioCtx;
+  activeNodes.forEach(src=>{ try{
+    if(ac && src._g){ const now=ac.currentTime, g=src._g;
+      try{ g.gain.cancelScheduledValues(now); }catch(e){}
+      let v=1; try{ v=g.gain.value; }catch(e){}
+      try{ g.gain.setValueAtTime(v, now); g.gain.linearRampToValueAtTime(0.0001, now+0.025); }catch(e){}  // fundido de salida corto
+      try{ src.stop(now+0.05); }catch(e){}
+    } else { try{ src.stop(); }catch(e){} }
+  }catch(e){} });
+  activeNodes=[];
+}
 
 /* ---------- grabación ---------- */
 let stream=null, recorder=null, chunks=[], recStart=0, recTimer=null, analyser=null, levelRAF=null, recState='idle';
@@ -811,7 +831,7 @@ function renderLayers(){
     row.querySelector('.dl').onclick=()=>downloadLayer(l);
     row.querySelector('.del').onclick=()=>confirmDeleteLayer(l);
     const vr=row.querySelector('.volrange'), vv=row.querySelector('.volval');
-    vr.oninput=()=>{ l.volume=vr.value/100; vv.textContent=vr.value; const a=activeAudios.find(x=>x._lid===l.id); if(a) a.volume=l.volume; };
+    vr.oninput=()=>{ l.volume=vr.value/100; vv.textContent=vr.value; const n=activeNodes.find(x=>x._lid===l.id); if(n && n._g && audioCtx){ try{ n._g.gain.setTargetAtTime(l.volume, audioCtx.currentTime, 0.01); }catch(e){} } };
     vr.onchange=()=>{ current.updatedAt=Date.now(); DB.put(clone(current)); };
     box.appendChild(row);
   });
@@ -877,8 +897,7 @@ async function downloadMix(){
     const ac=ctx(); const sr=ac.sampleRate;
     const parts=[];
     for(const l of layers){
-      const arr=await l.blob.arrayBuffer();
-      const buf=await ac.decodeAudioData(arr);
+      const buf=await ensureBuf(l);
       const ts=Math.min(Math.max(0,l.trimStart||0), buf.duration);
       let te=(l.trimEnd!=null? l.trimEnd : buf.duration); te=Math.min(Math.max(te,ts), buf.duration);
       const d=Math.max(0, (te>ts? te-ts : buf.duration));
@@ -941,7 +960,7 @@ function trimSheet(l){
   openSheet(
     '<h3>Recortar «'+escapeHtml(l.name)+'»</h3>'+
     '<p class="note">Arrastra los bordes para quedarte solo con el trozo que quieras. No se toca el audio original.</p>'+
-    '<div class="trimbar" id="tb"><div class="trim-sel" id="tsel"></div><div class="trim-h" id="thS"></div><div class="trim-h" id="thE"></div></div>'+
+    '<div class="trimbar" id="tb"><canvas id="twave"></canvas><div class="trim-sel" id="tsel"></div><div class="trim-h" id="thS"></div><div class="trim-h" id="thE"></div></div>'+
     '<div class="trim-times"><span>Inicio <b id="tIni">0</b></span><span>Dura <b id="tDur">0</b></span><span>Fin <b id="tFin">0</b></span></div>'+
     '<div class="sheet-actions"><button class="btn-ghost" id="tPrev">▶ Escuchar recorte</button><button class="btn-primary" id="tSave">Guardar</button></div>'+
     '<div class="sheet-actions" style="margin-top:10px"><button class="btn-ghost" id="tReset">Quitar recorte</button><button class="btn-ghost" id="tCancel">Cancelar</button></div>'
@@ -952,7 +971,20 @@ function trimSheet(l){
     sel.style.left=(a*w)+'px'; sel.style.width=Math.max(0,(b-a)*w)+'px';
     $('#tIni').textContent=fmtt(ts); $('#tFin').textContent=fmtt(te); $('#tDur').textContent=fmtt(te-ts);
   }
-  setTimeout(redraw,30);
+  async function drawWave(){
+    try{ const b=await ensureBuf(l); const cv=$('#twave'); if(!cv) return;
+      const w=bar.clientWidth||300, h=bar.clientHeight||56, dpr=Math.min(2, window.devicePixelRatio||1);
+      cv.width=w*dpr; cv.height=h*dpr;
+      const cx=cv.getContext('2d'); cx.scale(dpr,dpr); cx.clearRect(0,0,w,h);
+      const ch=b.getChannelData(0), n=ch.length, mid=h/2, step=Math.max(1, Math.floor(n/w));
+      cx.strokeStyle=(getComputedStyle(document.documentElement).getPropertyValue('--muted').trim()||'#9a8f7d');
+      cx.globalAlpha=0.85; cx.beginPath();
+      for(let x=0;x<w;x++){ let mn=1,mx=-1; const s=x*step; for(let i=0;i<step;i++){ const v=ch[s+i]||0; if(v<mn)mn=v; if(v>mx)mx=v; }
+        cx.moveTo(x+0.5, mid+mn*mid*0.92); cx.lineTo(x+0.5, mid+mx*mid*0.92); }
+      cx.stroke();
+    }catch(e){}
+  }
+  setTimeout(()=>{ redraw(); drawWave(); },30);
   function drag(handle, isStart){
     handle.addEventListener('pointerdown', e=>{ e.preventDefault(); try{handle.setPointerCapture(e.pointerId);}catch(_){}
       const move=ev=>{ const rect=bar.getBoundingClientRect(); let x=(ev.clientX-rect.left)/rect.width; x=Math.max(0,Math.min(1,x)); const t=x*full;
