@@ -1,4 +1,4 @@
-const CACHE='pocket-channel-v6';
+const CACHE='pocket-channel-v7';
 const ASSETS=['./','./index.html','./fonts.css','./manifest.webmanifest',
   './icon-192.png','./icon-512.png','./icon-512-maskable.png','./icon-180.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));});

@@ -205,6 +205,16 @@
   .opt .od{font-size:12.5px; color:var(--muted); margin-top:3px; line-height:1.45; display:block}
   .sheet .note{font-size:12px; color:var(--faint); line-height:1.5; margin:2px 0 16px}
 
+  /* recortador de audio */
+  .trimbar{position:relative; height:56px; border-radius:12px; background:var(--surface-2); border:1px solid var(--line);
+    margin:6px 0 8px; touch-action:none; overflow:hidden; user-select:none}
+  .trim-sel{position:absolute; top:0; bottom:0; background:var(--accent-soft); border-left:2px solid var(--accent); border-right:2px solid var(--accent)}
+  .trim-h{position:absolute; top:0; bottom:0; width:26px; margin-left:-13px; display:flex; align-items:center; justify-content:center;
+    cursor:ew-resize; touch-action:none; z-index:2}
+  .trim-h::before{content:""; width:5px; height:64%; border-radius:3px; background:var(--accent); box-shadow:0 0 0 3px var(--ground)}
+  .trim-times{display:flex; justify-content:space-between; font-family:var(--f-mono); font-size:11px; color:var(--muted); margin:0 2px 16px}
+  .trim-times b{color:var(--text); font-weight:700}
+
   /* punto rojo de guía visual (late al BPM) */
   .beat-pulse{width:64px; height:64px; border-radius:50%; display:none; place-items:center; position:relative}
   .beat-pulse.show{display:grid}
@@ -568,22 +578,32 @@ function stopMetro(){ metro.running=false; clearTimeout(metro.timer); metro.time
 let activeAudios=[];
 function fadeVol(a, from, to, ms){ const steps=10, dt=Math.max(4,ms/steps); let i=0; a.volume=Math.max(0,Math.min(1,from));
   clearInterval(a._fade); a._fade=setInterval(()=>{ i++; const v=from+(to-from)*(i/steps); a.volume=Math.max(0,Math.min(1,v)); if(i>=steps){ clearInterval(a._fade); a._fade=null; } }, dt); }
+function layerTrim(l){ const full=l.dur||0; const ts=Math.max(0,l.trimStart||0); let te=(l.trimEnd!=null?l.trimEnd:full);
+  if(!(te>ts)) te=full; const trimmed=(ts>0)||(l.trimEnd!=null); return {ts,te,full,trimmed,region:(te>ts?te-ts:full)}; }
 function playLayers(layers, onEndAll){
-  stopLayers(); let ended=0, total=layers.length;
+  stopLayers(); let ended=0; const total=layers.length;
+  if(total===0){ if(onEndAll) onEndAll(); return; }
   layers.forEach(l=>{
     const url=URL.createObjectURL(l.blob); const a=new Audio(url); a._url=url; a._lid=l.id;
     const target=(l.volume==null?1:l.volume);
-    a.onended=()=>{ ended++; if(onEndAll && ended>=total) onEndAll(); };
-    a.volume=0;                                        // fundido de entrada para suavizar el click inicial
-    a.play().then(()=>fadeVol(a,0,target,28)).catch(()=>{ a.volume=target; });
-    if((l.dur||0)>0.25){                               // fundido de salida cerca del final
-      a._fadeOutT=setTimeout(()=>{ try{ fadeVol(a, a.volume, 0, 55); }catch(e){} }, Math.max(0,((l.dur)-0.07)*1000));
+    const T=layerTrim(l);
+    let done=false;
+    function finish(){ if(done) return; done=true; clearInterval(a._fade); clearTimeout(a._fadeOutT); clearTimeout(a._endT);
+      try{a.pause();}catch(e){} ended++; if(onEndAll && ended>=total) onEndAll(); }
+    a.onended=finish;
+    function begin(){
+      try{ a.currentTime=T.ts; }catch(e){}
+      a.volume=0;                                       // fundido de entrada
+      a.play().then(()=>fadeVol(a,0,target,28)).catch(()=>{ a.volume=target; });
+      if(T.trimmed && T.region>0){ a._endT=setTimeout(finish, T.region*1000); }   // cortar en el fin del recorte
+      const foBase=T.trimmed? T.region : T.full;
+      if(foBase>0.25){ a._fadeOutT=setTimeout(()=>{ try{ fadeVol(a, a.volume, 0, 55); }catch(e){} }, Math.max(0,(foBase-0.07)*1000)); }
     }
+    if(a.readyState>=1) begin(); else a.addEventListener('loadedmetadata', begin, {once:true});
     activeAudios.push(a);
   });
-  if(total===0 && onEndAll) onEndAll();
 }
-function stopLayers(){ activeAudios.forEach(a=>{ try{a.pause();}catch(e){} clearInterval(a._fade); clearTimeout(a._fadeOutT); if(a._url)URL.revokeObjectURL(a._url); }); activeAudios=[]; }
+function stopLayers(){ activeAudios.forEach(a=>{ try{a.pause();}catch(e){} clearInterval(a._fade); clearTimeout(a._fadeOutT); clearTimeout(a._endT); if(a._url)URL.revokeObjectURL(a._url); }); activeAudios=[]; }
 
 /* ---------- grabación ---------- */
 let stream=null, recorder=null, chunks=[], recStart=0, recTimer=null, analyser=null, levelRAF=null, recState='idle';
@@ -706,7 +726,7 @@ function resetDockUI(){
 
 /* blobs no se pueden pasar a IndexedDB dentro de proxies raros; clon simple */
 function clone(p){ return {id:p.id, name:p.name, bpm:p.bpm, createdAt:p.createdAt, updatedAt:p.updatedAt,
-  layers:p.layers.map(l=>({id:l.id,name:l.name,blob:l.blob,dur:l.dur,createdAt:l.createdAt,muted:l.muted,volume:(l.volume==null?1:l.volume),imported:!!l.imported}))}; }
+  layers:p.layers.map(l=>({id:l.id,name:l.name,blob:l.blob,dur:l.dur,createdAt:l.createdAt,muted:l.muted,volume:(l.volume==null?1:l.volume),imported:!!l.imported,trimStart:(l.trimStart||0),trimEnd:(l.trimEnd==null?null:l.trimEnd)}))}; }
 
 /* ---------- navegación ---------- */
 function show(which){
@@ -766,12 +786,14 @@ function renderLayers(){
   }
   current.layers.forEach((l,i)=>{
     const vol=(l.volume==null?1:l.volume);
+    const T=layerTrim(l); const shown=T.trimmed? T.region : (l.dur||0);
     const row=document.createElement('div'); row.className='layer'+(l.muted?' muted':''); row.dataset.id=l.id;
     row.innerHTML=
       '<div class="lrow">'+
         '<button class="lplay" aria-label="Escuchar capa"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg></button>'+
-        '<div class="lmeta"><div class="lname"></div><div class="ltime">'+fmt(l.dur||0)+(l.imported?' · importado':'')+'</div></div>'+
+        '<div class="lmeta"><div class="lname"></div><div class="ltime">'+fmt(shown)+(T.trimmed?' · recortado':'')+(l.imported?' · importado':'')+'</div></div>'+
         '<div class="lctrls">'+
+          '<button class="trim" aria-label="Recortar"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/></svg></button>'+
           '<button class="mute'+(l.muted?' active':'')+'" aria-label="Silenciar">'+muteIcon(l.muted)+'</button>'+
           '<button class="dl" aria-label="Descargar"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 11l5 4 5-4M5 21h14"/></svg></button>'+
           '<button class="del" aria-label="Borrar"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>'+
@@ -784,6 +806,7 @@ function renderLayers(){
       '</div>';
     row.querySelector('.lname').textContent=l.name;
     row.querySelector('.lplay').onclick=()=>toggleLayerPlay(l, row.querySelector('.lplay'));
+    row.querySelector('.trim').onclick=()=>trimSheet(l);
     row.querySelector('.mute').onclick=()=>toggleMute(l);
     row.querySelector('.dl').onclick=()=>downloadLayer(l);
     row.querySelector('.del').onclick=()=>confirmDeleteLayer(l);
@@ -856,15 +879,18 @@ async function downloadMix(){
     for(const l of layers){
       const arr=await l.blob.arrayBuffer();
       const buf=await ac.decodeAudioData(arr);
-      parts.push({buf, vol:(l.volume==null?1:l.volume)});
+      const ts=Math.min(Math.max(0,l.trimStart||0), buf.duration);
+      let te=(l.trimEnd!=null? l.trimEnd : buf.duration); te=Math.min(Math.max(te,ts), buf.duration);
+      const d=Math.max(0, (te>ts? te-ts : buf.duration));
+      parts.push({buf, vol:(l.volume==null?1:l.volume), ts:(te>ts?ts:0), dur:d});
     }
-    const length=Math.max.apply(null, parts.map(p=>p.buf.length));
+    const length=Math.max(1, Math.ceil(Math.max.apply(null, parts.map(p=>p.dur))*sr));
     const off=new OfflineAudioContext(2, length, sr);
     parts.forEach(p=>{ const s=off.createBufferSource(); s.buffer=p.buf; const g=off.createGain();
-      const d=p.buf.duration, fin=0.008, fout=Math.min(0.03, d/2);   // pequeños fundidos para evitar clicks
+      const d=p.dur, fin=0.008, fout=Math.min(0.03, d/2);   // pequeños fundidos para evitar clicks
       g.gain.setValueAtTime(0.0001,0); g.gain.linearRampToValueAtTime(p.vol,fin);
       g.gain.setValueAtTime(p.vol,Math.max(fin,d-fout)); g.gain.linearRampToValueAtTime(0.0001,d);
-      s.connect(g).connect(off.destination); s.start(0); });
+      s.connect(g).connect(off.destination); s.start(0, p.ts, p.dur); });
     const out=await off.startRendering();
     const blob=new Blob([bufferToWav(out)],{type:'audio/wav'});
     const url=URL.createObjectURL(blob);
@@ -902,6 +928,53 @@ async function onImportFile(e){
   current.layers.push(layer); current.updatedAt=Date.now();
   await DB.put(clone(current)); renderLayers(); renderProjectSub();
   toast('Audio importado');
+}
+
+/* ---------- recortar audio (no destructivo) ---------- */
+function trimSheet(l){
+  stopLayers(); layerPlaying=null;
+  const full=Math.max(0.05, l.dur||0);
+  let ts=Math.max(0, l.trimStart||0);
+  let te=(l.trimEnd!=null? l.trimEnd : full);
+  if(!(te>ts)){ ts=0; te=full; }
+  const fmtt=s=>{ s=Math.max(0,s); return s<60 ? s.toFixed(1)+'s' : Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'); };
+  openSheet(
+    '<h3>Recortar «'+escapeHtml(l.name)+'»</h3>'+
+    '<p class="note">Arrastra los bordes para quedarte solo con el trozo que quieras. No se toca el audio original.</p>'+
+    '<div class="trimbar" id="tb"><div class="trim-sel" id="tsel"></div><div class="trim-h" id="thS"></div><div class="trim-h" id="thE"></div></div>'+
+    '<div class="trim-times"><span>Inicio <b id="tIni">0</b></span><span>Dura <b id="tDur">0</b></span><span>Fin <b id="tFin">0</b></span></div>'+
+    '<div class="sheet-actions"><button class="btn-ghost" id="tPrev">▶ Escuchar recorte</button><button class="btn-primary" id="tSave">Guardar</button></div>'+
+    '<div class="sheet-actions" style="margin-top:10px"><button class="btn-ghost" id="tReset">Quitar recorte</button><button class="btn-ghost" id="tCancel">Cancelar</button></div>'
+  );
+  const bar=$('#tb'), sel=$('#tsel'), hS=$('#thS'), hE=$('#thE');
+  function redraw(){ const w=bar.clientWidth||1; const a=ts/full, b=te/full;
+    hS.style.left=(a*w)+'px'; hE.style.left=(b*w)+'px';
+    sel.style.left=(a*w)+'px'; sel.style.width=Math.max(0,(b-a)*w)+'px';
+    $('#tIni').textContent=fmtt(ts); $('#tFin').textContent=fmtt(te); $('#tDur').textContent=fmtt(te-ts);
+  }
+  setTimeout(redraw,30);
+  function drag(handle, isStart){
+    handle.addEventListener('pointerdown', e=>{ e.preventDefault(); try{handle.setPointerCapture(e.pointerId);}catch(_){}
+      const move=ev=>{ const rect=bar.getBoundingClientRect(); let x=(ev.clientX-rect.left)/rect.width; x=Math.max(0,Math.min(1,x)); const t=x*full;
+        if(isStart) ts=Math.min(t, te-0.05); else te=Math.max(t, ts+0.05);
+        ts=Math.max(0,ts); te=Math.min(full,te); redraw();
+      };
+      const up=()=>{ handle.removeEventListener('pointermove',move); handle.removeEventListener('pointerup',up); handle.removeEventListener('pointercancel',up); };
+      handle.addEventListener('pointermove',move); handle.addEventListener('pointerup',up); handle.addEventListener('pointercancel',up);
+    });
+  }
+  drag(hS,true); drag(hE,false);
+  let pa=null;
+  function closePrev(){ if(pa){ try{pa.pause();}catch(e){} if(pa._u)URL.revokeObjectURL(pa._u); clearTimeout(pa._t); pa=null; } const b=$('#tPrev'); if(b) b.textContent='▶ Escuchar recorte'; }
+  $('#tPrev').onclick=()=>{ if(pa){ closePrev(); return; }
+    const u=URL.createObjectURL(l.blob); pa=new Audio(u); pa._u=u;
+    const go=()=>{ try{pa.currentTime=ts;}catch(e){} pa.play().catch(()=>{}); pa._t=setTimeout(closePrev, Math.max(60,(te-ts)*1000)); };
+    if(pa.readyState>=1) go(); else pa.addEventListener('loadedmetadata',go,{once:true});
+    $('#tPrev').textContent='⏸ Parar';
+  };
+  $('#tSave').onclick=()=>{ closePrev(); l.trimStart=ts; l.trimEnd=te; current.updatedAt=Date.now(); DB.put(clone(current)); closeSheet(); renderLayers(); renderProjectSub(); toast('Recorte guardado'); };
+  $('#tReset').onclick=()=>{ closePrev(); l.trimStart=0; l.trimEnd=null; current.updatedAt=Date.now(); DB.put(clone(current)); closeSheet(); renderLayers(); renderProjectSub(); toast('Recorte quitado'); };
+  $('#tCancel').onclick=()=>{ closePrev(); closeSheet(); };
 }
 
 /* ---------- crear / renombrar / borrar ---------- */
