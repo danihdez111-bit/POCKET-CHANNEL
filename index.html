@@ -293,6 +293,8 @@
   .tl-block canvas{position:absolute; inset:0}
   .tl-block .bl-name{position:absolute; left:6px; top:3px; font-size:10px; font-weight:700; color:var(--text);
     z-index:1; white-space:nowrap; pointer-events:none; max-width:calc(100% - 8px); overflow:hidden; text-overflow:ellipsis}
+  .tl-playhead{position:absolute; top:0; bottom:0; width:2px; background:var(--rec); z-index:3; pointer-events:none; box-shadow:0 0 6px var(--rec)}
+  .tl-playhead::before{content:""; position:absolute; top:0; left:-4px; border:5px solid transparent; border-top-color:var(--rec)}
 
   /* ---------- transport (record dock) ---------- */
   .dock{
@@ -557,6 +559,7 @@ let micList=[];
 let holdActive=false, discardRec=false;   // grabar manteniendo pulsado (estilo WhatsApp)
 let loopAll=false;                         // reproducir/grabar sobre bucle
 let timelineOn=false;                       // vista de compases (opcional)
+let playClock=null, tlRAF=null;             // reloj de reproducción para el cursor (playhead)
 
 /* ---------- audio context ---------- */
 function ctx(){ if(!audioCtx){ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); } if(audioCtx.state==='suspended') audioCtx.resume(); return audioCtx; }
@@ -620,6 +623,7 @@ async function playLayers(layers, onEndAll){
   catch(e){ if(onEndAll) onEndAll(); return; }
   if(myToken!==playToken) return;                       // cancelado mientras descodificaba
   let ended=0; const startT=ac.currentTime+0.04;
+  playClock={startT:startT}; if(timelineOn) startTlTick();
   bufs.forEach(({l,b})=>{
     if(!b){ ended++; if(ended>=total && onEndAll && myToken===playToken) onEndAll(); return; }
     const T=trimFor(l, b.duration); const region=Math.max(0.02, T.region);
@@ -649,7 +653,8 @@ function stopLayers(){
       try{ src.stop(now+0.05); }catch(e){}
     } else { try{ src.stop(); }catch(e){} }
   }catch(e){} });
-  activeNodes=[];
+  activeNodes=[]; playClock=null;
+  const ph=document.getElementById('tlPlayhead'); if(ph) ph.hidden=true;
 }
 
 /* ---------- grabación ---------- */
@@ -873,7 +878,7 @@ function toggleMute(l){ l.muted=!l.muted; DB.put(clone(current)); renderLayers()
 function toggleLayerPlay(l, btn){
   if(layerPlaying===l.id){ stopLayers(); layerPlaying=null; refreshLayerPlayIcons(); return; }
   playAllState=false; updatePlayAllUI();
-  playLayers([l], ()=>{ layerPlaying=null; refreshLayerPlayIcons(); });
+  playLayers([l], ()=>{ layerPlaying=null; refreshLayerPlayIcons(); playClock=null; });
   layerPlaying=l.id; refreshLayerPlayIcons();
 }
 function refreshLayerPlayIcons(){
@@ -895,7 +900,7 @@ function togglePlayAll(){
   (function cycle(){
     const layers=current.layers.filter(l=>!l.muted);
     if(!layers.length){ playAllState=false; updatePlayAllUI(); return; }
-    playLayers(layers, ()=>{ if(playAllState && loopAll) cycle(); else { playAllState=false; updatePlayAllUI(); } });
+    playLayers(layers, ()=>{ if(playAllState && loopAll) cycle(); else { playAllState=false; updatePlayAllUI(); playClock=null; } });
   })();
 }
 function updatePlayAllUI(){
@@ -913,8 +918,20 @@ function toggleView(){
   timelineOn=!timelineOn;
   $('#viewBtn').classList.toggle('on',timelineOn); $('#viewBtn').setAttribute('aria-pressed',timelineOn?'true':'false');
   $('#layersList').hidden=timelineOn; $('#timeline').classList.toggle('on',timelineOn);
-  stopLayers();
-  if(timelineOn) renderTimeline();
+  if(timelineOn){ renderTimeline(); if(playClock) startTlTick(); }
+}
+function startTlTick(){ if(tlRAF==null) tlRAF=requestAnimationFrame(tlTick); }
+function tlTick(){
+  tlRAF=null;
+  const ph=document.getElementById('tlPlayhead');
+  if(!timelineOn || !playClock || !audioCtx || !ph){ if(ph) ph.hidden=true; return; }
+  const M=tlMetrics(); const t=audioCtx.currentTime - playClock.startT;
+  ph.hidden=false; const x=Math.max(0,t)*M.pxSec; ph.style.left=x+'px';
+  const scroll=document.querySelector('#timeline .tl-scroll');
+  if(scroll){ const vw=scroll.clientWidth;
+    if(x - scroll.scrollLeft > vw-70) scroll.scrollLeft=x-vw+90;
+    else if(x < scroll.scrollLeft+10) scroll.scrollLeft=Math.max(0,x-40); }
+  tlRAF=requestAnimationFrame(tlTick);
 }
 function renderTimeline(){
   const wrap=$('#timeline'); if(!wrap||!current) return;
@@ -927,7 +944,7 @@ function renderTimeline(){
   ruler+='</div>';
   const grid='background-image:repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px '+M.pxBeat+'px), repeating-linear-gradient(90deg, var(--faint) 0 1px, transparent 1px '+TL_PXBAR+'px); background-size:'+M.pxBeat+'px 100%, '+TL_PXBAR+'px 100%';
   let lanes=''; current.layers.forEach(l=>{ lanes+='<div class="tl-lane" data-id="'+l.id+'" style="width:'+totalW+'px; '+grid+'"></div>'; });
-  wrap.innerHTML='<div class="tl-hint">Arrastra los bloques para colocarlos (se pegan a cada tiempo). «Escuchar todo» respeta las posiciones.</div><div class="tl-scroll"><div class="tl-inner">'+ruler+lanes+'</div></div>';
+  wrap.innerHTML='<div class="tl-hint">Arrastra los bloques para colocarlos (se pegan a cada tiempo). «Escuchar todo» respeta las posiciones.</div><div class="tl-scroll"><div class="tl-inner">'+ruler+lanes+'<div class="tl-playhead" id="tlPlayhead" hidden></div></div></div>';
   current.layers.forEach(l=>{
     const lane=wrap.querySelector('.tl-lane[data-id="'+l.id+'"]'); if(!lane) return;
     const T=layerTrim(l), region=T.region||(l.dur||0);
