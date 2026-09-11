@@ -526,8 +526,8 @@ function ctx(){ if(!audioCtx){ audioCtx=new (window.AudioContext||window.webkitA
 
 /* ---------- metrónomo ---------- */
 const metro={bpm:90, next:0, beat:0, timer:null, running:false, silent:false};
-function scheduleClick(time, accent){
-  const c=audioCtx;
+function scheduleClick(time, beat){
+  const c=audioCtx; const accent=(beat%4===0);
   if(!metro.silent){                     // en modo guía visual no suena: solo parpadea
     const osc=c.createOscillator(), g=c.createGain();
     osc.frequency.value=accent?1600:1050;
@@ -538,10 +538,11 @@ function scheduleClick(time, accent){
     osc.start(time); osc.stop(time+0.06);
   }
   const when=(time-c.currentTime)*1000;
-  setTimeout(()=>flashBeat(accent), Math.max(0,when));
+  setTimeout(()=>flashBeat(beat), Math.max(0,when));   // pasamos el tiempo exacto, no el metro.beat ya avanzado
 }
-function flashBeat(accent){
-  const dots=$('#beatDots').children; const idx=metro.beat%4;
+function flashBeat(beat){
+  const idx=((beat%4)+4)%4; const accent=(beat%4===0);
+  const dots=$('#beatDots').children;
   for(let i=0;i<dots.length;i++) dots[i].classList.remove('hit','one');
   dots[idx].classList.add('hit'); if(accent) dots[idx].classList.add('one');
   setTimeout(()=>{ if(dots[idx]) dots[idx].classList.remove('hit','one'); },120);
@@ -554,7 +555,7 @@ function flashBeat(accent){
 function metroLoop(){
   const c=audioCtx;
   while(metro.next < c.currentTime + 0.12){
-    scheduleClick(metro.next, metro.beat%4===0);
+    scheduleClick(metro.next, metro.beat);
     metro.next += 60/metro.bpm; metro.beat++;
   }
   metro.timer=setTimeout(metroLoop,25);
@@ -565,18 +566,24 @@ function stopMetro(){ metro.running=false; clearTimeout(metro.timer); metro.time
 
 /* ---------- reproducción de capas ---------- */
 let activeAudios=[];
+function fadeVol(a, from, to, ms){ const steps=10, dt=Math.max(4,ms/steps); let i=0; a.volume=Math.max(0,Math.min(1,from));
+  clearInterval(a._fade); a._fade=setInterval(()=>{ i++; const v=from+(to-from)*(i/steps); a.volume=Math.max(0,Math.min(1,v)); if(i>=steps){ clearInterval(a._fade); a._fade=null; } }, dt); }
 function playLayers(layers, onEndAll){
   stopLayers(); let ended=0, total=layers.length;
   layers.forEach(l=>{
     const url=URL.createObjectURL(l.blob); const a=new Audio(url); a._url=url; a._lid=l.id;
-    a.volume=(l.volume==null?1:l.volume);
+    const target=(l.volume==null?1:l.volume);
     a.onended=()=>{ ended++; if(onEndAll && ended>=total) onEndAll(); };
-    a.play().catch(()=>{});
+    a.volume=0;                                        // fundido de entrada para suavizar el click inicial
+    a.play().then(()=>fadeVol(a,0,target,28)).catch(()=>{ a.volume=target; });
+    if((l.dur||0)>0.25){                               // fundido de salida cerca del final
+      a._fadeOutT=setTimeout(()=>{ try{ fadeVol(a, a.volume, 0, 55); }catch(e){} }, Math.max(0,((l.dur)-0.07)*1000));
+    }
     activeAudios.push(a);
   });
   if(total===0 && onEndAll) onEndAll();
 }
-function stopLayers(){ activeAudios.forEach(a=>{ try{a.pause();}catch(e){} if(a._url)URL.revokeObjectURL(a._url); }); activeAudios=[]; }
+function stopLayers(){ activeAudios.forEach(a=>{ try{a.pause();}catch(e){} clearInterval(a._fade); clearTimeout(a._fadeOutT); if(a._url)URL.revokeObjectURL(a._url); }); activeAudios=[]; }
 
 /* ---------- grabación ---------- */
 let stream=null, recorder=null, chunks=[], recStart=0, recTimer=null, analyser=null, levelRAF=null, recState='idle';
@@ -853,7 +860,11 @@ async function downloadMix(){
     }
     const length=Math.max.apply(null, parts.map(p=>p.buf.length));
     const off=new OfflineAudioContext(2, length, sr);
-    parts.forEach(p=>{ const s=off.createBufferSource(); s.buffer=p.buf; const g=off.createGain(); g.gain.value=p.vol; s.connect(g).connect(off.destination); s.start(0); });
+    parts.forEach(p=>{ const s=off.createBufferSource(); s.buffer=p.buf; const g=off.createGain();
+      const d=p.buf.duration, fin=0.008, fout=Math.min(0.03, d/2);   // pequeños fundidos para evitar clicks
+      g.gain.setValueAtTime(0.0001,0); g.gain.linearRampToValueAtTime(p.vol,fin);
+      g.gain.setValueAtTime(p.vol,Math.max(fin,d-fout)); g.gain.linearRampToValueAtTime(0.0001,d);
+      s.connect(g).connect(off.destination); s.start(0); });
     const out=await off.startRendering();
     const blob=new Blob([bufferToWav(out)],{type:'audio/wav'});
     const url=URL.createObjectURL(blob);
