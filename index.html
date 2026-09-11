@@ -620,6 +620,7 @@ async function startRecording(){
   recorder.onstop=onRecStop;
   recorder.start();
   recState='recording'; recStart=Date.now();
+  if(navigator.vibrate) navigator.vibrate(18);         // vibración al empezar a grabar
   btn.classList.remove('armed'); btn.classList.add('recording');
   $('#liveTag').style.display='flex';
   const tt=$('#recTime'); tt.hidden=false; tt.textContent='00:00';
@@ -651,6 +652,7 @@ function onRecStop(){
   current.updatedAt=Date.now();
   DB.put(clone(current)).then(()=>{ renderLayers(); renderProjectSub(); });
   recState='idle'; resetDockUI();
+  if(navigator.vibrate) navigator.vibrate([12,30,12]);   // vibración de confirmación al guardar
   toast('Capa guardada');
 }
 function resetDockUI(){
