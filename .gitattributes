@@ -1,0 +1,7 @@
+# Mantener saltos de línea LF en los archivos de texto (evita el aviso CRLF en Windows)
+* text=auto eol=lf
+
+# Tratar estos como binarios: nunca se tocan los saltos de línea
+*.png binary
+*.woff binary
+*.woff2 binary

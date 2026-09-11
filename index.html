@@ -620,7 +620,7 @@ async function startRecording(){
   recorder.onstop=onRecStop;
   recorder.start();
   recState='recording'; recStart=Date.now();
-  if(navigator.vibrate) navigator.vibrate(18);         // vibración al empezar a grabar
+  if(navigator.vibrate) navigator.vibrate(45);         // vibración al empezar a grabar
   btn.classList.remove('armed'); btn.classList.add('recording');
   $('#liveTag').style.display='flex';
   const tt=$('#recTime'); tt.hidden=false; tt.textContent='00:00';
@@ -652,7 +652,7 @@ function onRecStop(){
   current.updatedAt=Date.now();
   DB.put(clone(current)).then(()=>{ renderLayers(); renderProjectSub(); });
   recState='idle'; resetDockUI();
-  if(navigator.vibrate) navigator.vibrate([12,30,12]);   // vibración de confirmación al guardar
+  if(navigator.vibrate) navigator.vibrate([30,60,40]);   // vibración de confirmación al guardar
   toast('Capa guardada');
 }
 function resetDockUI(){
@@ -969,8 +969,17 @@ $('#themeBtn').onclick=()=>applyTheme(document.documentElement.getAttribute('dat
   show('projects');
 })();
 
-/* registro del service worker (offline) */
-if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('service-worker.js').catch(function(){});});}
+/* registro del service worker (offline) + auto-actualización */
+if('serviceWorker' in navigator){
+  window.addEventListener('load',function(){
+    navigator.serviceWorker.register('service-worker.js').then(function(r){ try{r.update();}catch(e){} }).catch(function(){});
+  });
+  var _pcReloaded=false;
+  navigator.serviceWorker.addEventListener('controllerchange',function(){
+    if(_pcReloaded) return; _pcReloaded=true;
+    if(typeof recState==='undefined' || recState==='idle'){ window.location.reload(); }
+  });
+}
 </script>
 
 </body>
