@@ -46,7 +46,7 @@
     --shadow:0 10px 30px rgba(0,0,0,.45);
   }
 
-  *{box-sizing:border-box}
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
   html,body{height:100%}
   body{
     margin:0; background:var(--ground); color:var(--text);
@@ -224,10 +224,26 @@
 
   .layers{display:flex; flex-direction:column; gap:9px; padding:0 14px calc(190px + var(--host-pad))}
   .layer{
-    display:flex; align-items:center; gap:12px; background:var(--surface); border:1px solid var(--line);
-    border-radius:var(--r-md); padding:11px 12px 11px 11px;
+    display:flex; flex-direction:column; gap:9px; background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--r-md); padding:11px 12px;
   }
+  .layer .lrow{display:flex; align-items:center; gap:12px}
   .layer.muted{opacity:.5}
+  .lvol{display:flex; align-items:center; gap:9px; padding:0 2px}
+  .lvol .vico{color:var(--faint); flex:none; display:grid; place-items:center}
+  .lvol .volval{font-family:var(--f-mono); font-size:10px; color:var(--faint); width:30px; text-align:right; flex:none}
+  .volrange{-webkit-appearance:none; appearance:none; flex:1; height:4px; border-radius:3px; background:var(--surface-2); outline:none}
+  .volrange::-webkit-slider-thumb{-webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--accent); cursor:pointer; border:2px solid var(--surface)}
+  .volrange::-moz-range-thumb{width:14px; height:14px; border-radius:50%; background:var(--accent); border:none; cursor:pointer}
+  .sec-actions{display:flex; gap:8px; padding:2px 14px 2px}
+  .sec-actions button{flex:1; display:flex; align-items:center; justify-content:center; gap:7px; height:38px;
+    border-radius:12px; border:1px solid var(--line); background:var(--surface); color:var(--text); font-weight:600; font-size:13px}
+  .sec-actions button:hover{border-color:var(--accent)}
+  .sec-actions button[disabled]{opacity:.4; pointer-events:none}
+  .lh-actions{display:flex; align-items:center; gap:8px}
+  .loopbtn{display:flex; align-items:center; justify-content:center; width:36px; height:32px; border-radius:10px;
+    border:1px solid var(--line); color:var(--muted)}
+  .loopbtn.on{color:var(--accent-ink); background:var(--accent); border-color:var(--accent)}
   .layer .lplay{
     width:42px; height:42px; border-radius:12px; flex:none; display:grid; place-items:center;
     background:var(--surface-2); border:1px solid var(--line); color:var(--text);
@@ -403,11 +419,27 @@
 
       <div class="layers-head">
         <span class="t">Capas</span>
-        <button class="playall" id="playAllBtn" disabled>
-          <svg id="playAllIcon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>
-          <span id="playAllLbl">Escuchar todo</span>
+        <div class="lh-actions">
+          <button class="loopbtn" id="loopBtn" aria-pressed="false" title="Reproducir en bucle" aria-label="Bucle">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          </button>
+          <button class="playall" id="playAllBtn" disabled>
+            <svg id="playAllIcon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>
+            <span id="playAllLbl">Escuchar todo</span>
+          </button>
+        </div>
+      </div>
+      <div class="sec-actions">
+        <button id="importBtn" title="Importar un audio, p. ej. una instrumental">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M8 7l4-4 4 4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
+          Importar audio
+        </button>
+        <button id="mixBtn" disabled title="Descargar la demo mezclada en un solo audio">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></svg>
+          Descargar mezcla
         </button>
       </div>
+      <input type="file" id="importInput" accept="audio/*" hidden>
       <div class="layers" id="layersList"></div>
     </div>
 
@@ -487,6 +519,7 @@ let monitorMode='visual';   // 'visual' (sin cascos, guía visual) | 'audible' (
 let selectedMic='auto';     // 'auto' o deviceId concreto
 let micList=[];
 let holdActive=false, discardRec=false;   // grabar manteniendo pulsado (estilo WhatsApp)
+let loopAll=false;                         // reproducir/grabar sobre bucle
 
 /* ---------- audio context ---------- */
 function ctx(){ if(!audioCtx){ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); } if(audioCtx.state==='suspended') audioCtx.resume(); return audioCtx; }
@@ -535,7 +568,8 @@ let activeAudios=[];
 function playLayers(layers, onEndAll){
   stopLayers(); let ended=0, total=layers.length;
   layers.forEach(l=>{
-    const url=URL.createObjectURL(l.blob); const a=new Audio(url); a._url=url;
+    const url=URL.createObjectURL(l.blob); const a=new Audio(url); a._url=url; a._lid=l.id;
+    a.volume=(l.volume==null?1:l.volume);
     a.onended=()=>{ ended++; if(onEndAll && ended>=total) onEndAll(); };
     a.play().catch(()=>{});
     activeAudios.push(a);
@@ -610,8 +644,10 @@ async function startRecording(){
     await wait((60/metro.bpm)*4*1000);
     if(recState!=='arming'){ return; }       // cancelado durante la cuenta
   }
-  // las capas suenan SOLO en modo con cascos
-  if(!visual && hasBacking) playLayers(backing);
+  // las capas suenan SOLO en modo con cascos (en bucle si está activado)
+  if(!visual && hasBacking){
+    (function bck(){ playLayers(backing, ()=>{ if(recState==='recording' && loopAll) bck(); }); })();
+  }
 
   chunks=[];
   try{ recorder=new MediaRecorder(stream); }
@@ -663,7 +699,7 @@ function resetDockUI(){
 
 /* blobs no se pueden pasar a IndexedDB dentro de proxies raros; clon simple */
 function clone(p){ return {id:p.id, name:p.name, bpm:p.bpm, createdAt:p.createdAt, updatedAt:p.updatedAt,
-  layers:p.layers.map(l=>({id:l.id,name:l.name,blob:l.blob,dur:l.dur,createdAt:l.createdAt,muted:l.muted}))}; }
+  layers:p.layers.map(l=>({id:l.id,name:l.name,blob:l.blob,dur:l.dur,createdAt:l.createdAt,muted:l.muted,volume:(l.volume==null?1:l.volume),imported:!!l.imported}))}; }
 
 /* ---------- navegación ---------- */
 function show(which){
@@ -702,6 +738,7 @@ function openProject(id){
   $('#projTitle').textContent=current.name;
   $('#micBanner').style.display='none';
   recState='idle'; resetDockUI();
+  loopAll=false; { const lb=$('#loopBtn'); if(lb){ lb.classList.remove('on'); lb.setAttribute('aria-pressed','false'); } }
   renderProjectSub(); renderLayers(); updateChips();
   show('project');
 }
@@ -714,26 +751,38 @@ function renderProjectSub(){
 let layerPlaying=null, playAllState=false;
 function renderLayers(){
   const box=$('#layersList'); box.innerHTML='';
-  if(!current.layers.length){
-    box.innerHTML='<div class="layers-empty">Todavía no hay capas.<br>Pulsa el botón rojo para grabar la <b>primera capa</b> de esta idea.</div>';
-    $('#playAllBtn').disabled=true; return;
+  const has=current.layers.length>0;
+  $('#playAllBtn').disabled=!has; $('#mixBtn').disabled=!has;
+  if(!has){
+    box.innerHTML='<div class="layers-empty">Todavía no hay capas.<br>Mantén pulsado el botón rojo para grabar la <b>primera capa</b>, o importa un audio.</div>';
+    return;
   }
-  $('#playAllBtn').disabled=false;
   current.layers.forEach((l,i)=>{
+    const vol=(l.volume==null?1:l.volume);
     const row=document.createElement('div'); row.className='layer'+(l.muted?' muted':''); row.dataset.id=l.id;
     row.innerHTML=
-      '<button class="lplay" aria-label="Escuchar capa"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg></button>'+
-      '<div class="lmeta"><div class="lname"></div><div class="ltime">'+fmt(l.dur||0)+'</div></div>'+
-      '<div class="lctrls">'+
-        '<button class="mute'+(l.muted?' active':'')+'" aria-label="Silenciar">'+muteIcon(l.muted)+'</button>'+
-        '<button class="dl" aria-label="Descargar"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 11l5 4 5-4M5 21h14"/></svg></button>'+
-        '<button class="del" aria-label="Borrar"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>'+
+      '<div class="lrow">'+
+        '<button class="lplay" aria-label="Escuchar capa"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg></button>'+
+        '<div class="lmeta"><div class="lname"></div><div class="ltime">'+fmt(l.dur||0)+(l.imported?' · importado':'')+'</div></div>'+
+        '<div class="lctrls">'+
+          '<button class="mute'+(l.muted?' active':'')+'" aria-label="Silenciar">'+muteIcon(l.muted)+'</button>'+
+          '<button class="dl" aria-label="Descargar"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 11l5 4 5-4M5 21h14"/></svg></button>'+
+          '<button class="del" aria-label="Borrar"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="lvol">'+
+        '<span class="vico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>'+
+        '<input type="range" class="volrange" min="0" max="100" value="'+Math.round(vol*100)+'" aria-label="Volumen de la capa">'+
+        '<span class="volval">'+Math.round(vol*100)+'</span>'+
       '</div>';
     row.querySelector('.lname').textContent=l.name;
     row.querySelector('.lplay').onclick=()=>toggleLayerPlay(l, row.querySelector('.lplay'));
     row.querySelector('.mute').onclick=()=>toggleMute(l);
     row.querySelector('.dl').onclick=()=>downloadLayer(l);
     row.querySelector('.del').onclick=()=>confirmDeleteLayer(l);
+    const vr=row.querySelector('.volrange'), vv=row.querySelector('.volval');
+    vr.oninput=()=>{ l.volume=vr.value/100; vv.textContent=vr.value; const a=activeAudios.find(x=>x._lid===l.id); if(a) a.volume=l.volume; };
+    vr.onchange=()=>{ current.updatedAt=Date.now(); DB.put(clone(current)); };
     box.appendChild(row);
   });
   refreshLayerPlayIcons();
@@ -762,11 +811,14 @@ function refreshLayerPlayIcons(){
 /* escuchar todo */
 function togglePlayAll(){
   if(playAllState){ stopLayers(); playAllState=false; updatePlayAllUI(); return; }
-  const layers=current.layers.filter(l=>!l.muted);
-  if(!layers.length){ toast('Todas las capas están silenciadas'); return; }
+  if(!current.layers.some(l=>!l.muted)){ toast('Todas las capas están silenciadas'); return; }
   layerPlaying=null; refreshLayerPlayIcons();
-  playLayers(layers, ()=>{ playAllState=false; updatePlayAllUI(); });
   playAllState=true; updatePlayAllUI();
+  (function cycle(){
+    const layers=current.layers.filter(l=>!l.muted);
+    if(!layers.length){ playAllState=false; updatePlayAllUI(); return; }
+    playLayers(layers, ()=>{ if(playAllState && loopAll) cycle(); else { playAllState=false; updatePlayAllUI(); } });
+  })();
 }
 function updatePlayAllUI(){
   const on=playAllState;
@@ -786,24 +838,71 @@ function downloadLayer(l){
   toast('Descargando…');
 }
 
+/* ---------- descargar la demo mezclada (todas las capas activas en un audio) ---------- */
+async function downloadMix(){
+  const layers=current.layers.filter(l=>!l.muted);
+  if(!layers.length){ toast('No hay capas activas para mezclar'); return; }
+  toast('Preparando la mezcla…');
+  try{
+    const ac=ctx(); const sr=ac.sampleRate;
+    const parts=[];
+    for(const l of layers){
+      const arr=await l.blob.arrayBuffer();
+      const buf=await ac.decodeAudioData(arr);
+      parts.push({buf, vol:(l.volume==null?1:l.volume)});
+    }
+    const length=Math.max.apply(null, parts.map(p=>p.buf.length));
+    const off=new OfflineAudioContext(2, length, sr);
+    parts.forEach(p=>{ const s=off.createBufferSource(); s.buffer=p.buf; const g=off.createGain(); g.gain.value=p.vol; s.connect(g).connect(off.destination); s.start(0); });
+    const out=await off.startRendering();
+    const blob=new Blob([bufferToWav(out)],{type:'audio/wav'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=(current.name+' - mezcla.wav').replace(/[\/\\:*?"<>|]/g,'_');
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),6000);
+    if(navigator.vibrate) navigator.vibrate(30);
+    toast('Mezcla descargada');
+  }catch(e){ toast('No se pudo mezclar ('+((e&&e.name)||'error')+')'); }
+}
+function bufferToWav(buffer){
+  const numCh=Math.min(2,buffer.numberOfChannels), len=buffer.length, sr=buffer.sampleRate;
+  const blockAlign=numCh*2, dataSize=len*blockAlign;
+  const ab=new ArrayBuffer(44+dataSize), view=new DataView(ab); let p=0;
+  const ws=s=>{ for(let i=0;i<s.length;i++) view.setUint8(p++, s.charCodeAt(i)); };
+  const u32=v=>{ view.setUint32(p,v,true); p+=4; };
+  const u16=v=>{ view.setUint16(p,v,true); p+=2; };
+  ws('RIFF'); u32(36+dataSize); ws('WAVE'); ws('fmt '); u32(16); u16(1); u16(numCh); u32(sr); u32(sr*blockAlign); u16(blockAlign); u16(16); ws('data'); u32(dataSize);
+  const chans=[]; for(let c=0;c<numCh;c++) chans.push(buffer.getChannelData(c));
+  for(let i=0;i<len;i++){ for(let c=0;c<numCh;c++){ let s=Math.max(-1,Math.min(1,chans[c][i])); view.setInt16(p, s<0? s*0x8000 : s*0x7FFF, true); p+=2; } }
+  return ab;
+}
+
+/* ---------- importar un audio externo como capa ---------- */
+function audioDuration(blob){ return new Promise((res)=>{ const u=URL.createObjectURL(blob); const a=new Audio(); a.preload='metadata';
+  a.onloadedmetadata=()=>{ const d=isFinite(a.duration)?a.duration:0; URL.revokeObjectURL(u); res(d); };
+  a.onerror=()=>{ URL.revokeObjectURL(u); res(0); }; a.src=u; }); }
+async function onImportFile(e){
+  const f=e.target && e.target.files && e.target.files[0]; if(e.target) e.target.value='';
+  if(!f) return;
+  toast('Importando audio…');
+  let dur=0; try{ dur=await audioDuration(f); }catch(err){}
+  const name=(f.name||'Audio').replace(/\.[^.]+$/,'') || 'Audio importado';
+  const layer={id:uid(), name, blob:f, dur, createdAt:Date.now(), muted:false, volume:1, imported:true};
+  current.layers.push(layer); current.updatedAt=Date.now();
+  await DB.put(clone(current)); renderLayers(); renderProjectSub();
+  toast('Audio importado');
+}
+
 /* ---------- crear / renombrar / borrar ---------- */
 function openSheet(html){ $('#sheet').innerHTML=html; $('#sheetWrap').classList.add('open'); }
 function closeSheet(){ $('#sheetWrap').classList.remove('open'); }
 $('#sheetBg').onclick=closeSheet;
 
 function newProject(){
-  openSheet(
-    '<h3>Nueva idea</h3><p>Ponle un nombre (o déjalo y lo cambias luego).</p>'+
-    '<input id="npName" placeholder="p. ej. Idea del bus, Loop de guitarra…" maxlength="60" autocomplete="off">'+
-    '<div class="sheet-actions"><button class="btn-ghost" id="npCancel">Cancelar</button><button class="btn-primary" id="npOk">Crear</button></div>'
-  );
-  const inp=$('#npName'); setTimeout(()=>inp.focus(),50);
-  const ok=()=>{ const name=(inp.value.trim()||('Idea '+(projects.length+1)));
-    const p={id:uid(), name, bpm:90, createdAt:Date.now(), updatedAt:Date.now(), layers:[]};
-    projects.push(p); DB.put(clone(p)); closeSheet(); openProject(p.id);
-  };
-  $('#npOk').onclick=ok; $('#npCancel').onclick=closeSheet;
-  inp.onkeydown=e=>{ if(e.key==='Enter')ok(); };
+  // crear al momento y entrar directo a grabar; el nombre se pone luego tocando el título
+  const p={id:uid(), name:'Idea '+(projects.length+1), bpm:90, createdAt:Date.now(), updatedAt:Date.now(), layers:[]};
+  projects.push(p); DB.put(clone(p)); openProject(p.id);
+  toast('Nueva idea · toca el título para nombrarla');
 }
 function renameProject(){
   openSheet(
@@ -929,6 +1028,10 @@ $('#projMenuBtn').onclick=projectMenu;
 $('#playAllBtn').onclick=togglePlayAll;
 $('#micChip').onclick=micSheet;
 $('#monChip').onclick=monitorSheet;
+$('#loopBtn').onclick=()=>{ loopAll=!loopAll; const b=$('#loopBtn'); b.classList.toggle('on',loopAll); b.setAttribute('aria-pressed',loopAll?'true':'false'); toast(loopAll?'Bucle activado (para grabar encima)':'Bucle desactivado'); };
+$('#mixBtn').onclick=downloadMix;
+$('#importBtn').onclick=()=>$('#importInput').click();
+$('#importInput').onchange=onImportFile;
 if(navigator.mediaDevices && navigator.mediaDevices.addEventListener){
   navigator.mediaDevices.addEventListener('devicechange', async ()=>{
     await loadMics(); updateChips();
