@@ -263,7 +263,8 @@
   }
   .layer .lplay.playing{background:var(--accent); color:var(--accent-ink); border-color:var(--accent)}
   .layer .lmeta{flex:1; min-width:0}
-  .layer .lname{font-weight:600; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .layer .lname{font-weight:600; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer}
+  .layer .lname:active{color:var(--accent)}
   .layer .ltime{font-family:var(--f-mono); font-size:11px; color:var(--muted); margin-top:2px;
     font-variant-numeric:tabular-nums}
   .layer .lctrls{display:flex; gap:2px; flex:none}
@@ -862,6 +863,7 @@ function renderLayers(){
         '<span class="volval">'+Math.round(vol*100)+'</span>'+
       '</div>';
     row.querySelector('.lname').textContent=l.name;
+    row.querySelector('.lname').onclick=()=>renameLayer(l);
     row.querySelector('.lplay').onclick=()=>toggleLayerPlay(l, row.querySelector('.lplay'));
     row.querySelector('.trim').onclick=()=>trimSheet(l);
     row.querySelector('.mute').onclick=()=>toggleMute(l);
@@ -1170,6 +1172,17 @@ function renameProject(){
   const inp=$('#rnName'); inp.value=current.name; setTimeout(()=>{inp.focus();inp.select();},50);
   const ok=()=>{ const n=inp.value.trim(); if(n){ current.name=n; current.updatedAt=Date.now(); DB.put(clone(current)); $('#projTitle').textContent=n; } closeSheet(); };
   $('#rnOk').onclick=ok; $('#rnCancel').onclick=closeSheet;
+  inp.onkeydown=e=>{ if(e.key==='Enter')ok(); };
+}
+function renameLayer(l){
+  openSheet(
+    '<h3>Renombrar capa</h3>'+
+    '<input id="rlName" maxlength="60" autocomplete="off" placeholder="Nombre de la capa">'+
+    '<div class="sheet-actions"><button class="btn-ghost" id="rlCancel">Cancelar</button><button class="btn-primary" id="rlOk">Guardar</button></div>'
+  );
+  const inp=$('#rlName'); inp.value=l.name; setTimeout(()=>{inp.focus();inp.select();},50);
+  const ok=()=>{ const n=inp.value.trim(); if(n){ l.name=n; current.updatedAt=Date.now(); DB.put(clone(current)); renderLayers(); if(timelineOn) renderTimeline(); } closeSheet(); };
+  $('#rlOk').onclick=ok; $('#rlCancel').onclick=closeSheet;
   inp.onkeydown=e=>{ if(e.key==='Enter')ok(); };
 }
 function projectMenu(){
