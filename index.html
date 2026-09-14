@@ -287,7 +287,11 @@
   .tl-lane{position:relative; height:50px; margin-top:8px; border-radius:10px; background:var(--surface);
     border:1px solid var(--line); overflow:hidden}
   .tl-block{position:absolute; top:5px; bottom:5px; border-radius:8px; background:var(--accent-soft);
-    border:1px solid var(--accent); overflow:hidden; touch-action:none; cursor:grab; z-index:1; min-width:14px}
+    border:1px solid var(--accent); overflow:hidden; touch-action:none; cursor:grab; z-index:1; min-width:28px}
+  .bl-h{position:absolute; top:0; bottom:0; width:14px; z-index:2; cursor:ew-resize; touch-action:none;
+    display:flex; align-items:center; justify-content:center}
+  .bl-hl{left:0} .bl-hr{right:0}
+  .bl-h::before{content:""; width:3px; height:46%; border-radius:2px; background:var(--accent)}
   .tl-block:active{cursor:grabbing}
   .tl-block.muted{opacity:.45}
   .tl-block canvas{position:absolute; inset:0}
@@ -944,17 +948,17 @@ function renderTimeline(){
   ruler+='</div>';
   const grid='background-image:repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px '+M.pxBeat+'px), repeating-linear-gradient(90deg, var(--faint) 0 1px, transparent 1px '+TL_PXBAR+'px); background-size:'+M.pxBeat+'px 100%, '+TL_PXBAR+'px 100%';
   let lanes=''; current.layers.forEach(l=>{ lanes+='<div class="tl-lane" data-id="'+l.id+'" style="width:'+totalW+'px; '+grid+'"></div>'; });
-  wrap.innerHTML='<div class="tl-hint">Arrastra los bloques para colocarlos (se pegan a cada tiempo). «Escuchar todo» respeta las posiciones.</div><div class="tl-scroll"><div class="tl-inner">'+ruler+lanes+'<div class="tl-playhead" id="tlPlayhead" hidden></div></div></div>';
+  wrap.innerHTML='<div class="tl-hint">Arrastra el centro para mover y los bordes para recortar. Se pega a la rejilla y a los bordes de otros audios.</div><div class="tl-scroll"><div class="tl-inner">'+ruler+lanes+'<div class="tl-playhead" id="tlPlayhead" hidden></div></div></div>';
   current.layers.forEach(l=>{
     const lane=wrap.querySelector('.tl-lane[data-id="'+l.id+'"]'); if(!lane) return;
     const T=layerTrim(l), region=T.region||(l.dur||0);
     const blk=document.createElement('div'); blk.className='tl-block'+(l.muted?' muted':'');
-    blk.style.left=((l.startAt||0)*M.pxSec)+'px'; blk.style.width=Math.max(14, region*M.pxSec)+'px';
-    blk.innerHTML='<canvas></canvas><span class="bl-name"></span>';
+    blk.style.left=((l.startAt||0)*M.pxSec)+'px'; blk.style.width=Math.max(28, region*M.pxSec)+'px';
+    blk.innerHTML='<canvas></canvas><span class="bl-name"></span><div class="bl-h bl-hl"></div><div class="bl-h bl-hr"></div>';
     blk.querySelector('.bl-name').textContent=l.name;
     lane.appendChild(blk);
     drawBlockWave(l, blk.querySelector('canvas'));
-    setupBlockDrag(l, blk, M);
+    setupBlock(l, blk, M);
   });
 }
 function drawBlockWave(l, cv){
@@ -970,16 +974,48 @@ function drawBlockWave(l, cv){
     }catch(e){}
   });
 }
-function setupBlockDrag(l, blk, M){
-  blk.addEventListener('pointerdown', e=>{ e.preventDefault(); try{blk.setPointerCapture(e.pointerId);}catch(_){}
-    const startX=e.clientX, origAt=(l.startAt||0);
-    const move=ev=>{ let at=Math.max(0, origAt+(ev.clientX-startX)/M.pxSec); blk.style.left=(at*M.pxSec)+'px'; };
-    const up=ev=>{ let at=Math.max(0, origAt+(ev.clientX-startX)/M.pxSec); at=Math.round(at/M.beatDur)*M.beatDur;
-      l.startAt=at; current.updatedAt=Date.now(); DB.put(clone(current));
-      blk.removeEventListener('pointermove',move); blk.removeEventListener('pointerup',up); blk.removeEventListener('pointercancel',up);
-      renderTimeline();
-    };
+function persistBlock(){ current.updatedAt=Date.now(); DB.put(clone(current)); renderTimeline(); }
+function setupBlock(l, blk, M){
+  const pxSec=M.pxSec, beatDur=M.beatDur, edgeTh=8/pxSec;    // umbral de imán a bordes (8px)
+  function otherEdges(){ const a=[]; current.layers.forEach(o=>{ if(o.id===l.id) return; const T=layerTrim(o); const r=T.region||(o.dur||0); a.push(o.startAt||0); a.push((o.startAt||0)+r); }); return a; }
+  function snapVal(v){ let best=null, bd=edgeTh; otherEdges().forEach(e=>{ const d=Math.abs(v-e); if(d<bd){bd=d; best=e;} });
+    if(best!=null) return Math.max(0,best);                  // imán al borde de otro audio (aunque no cuadre)
+    return Math.max(0, Math.round(v/beatDur)*beatDur); }     // si no, a la rejilla (tiempo)
+  const full=()=>{ const T=layerTrim(l); return Math.max(l.dur||0, (T.ts+T.region)); };
+  // ----- MOVER (centro) -----
+  blk.addEventListener('pointerdown', e=>{ if(e.target && e.target.classList.contains('bl-h')) return; e.preventDefault();
+    try{blk.setPointerCapture(e.pointerId);}catch(_){}
+    const T0=layerTrim(l), region=T0.region||(l.dur||0), startX=e.clientX, origAt=(l.startAt||0);
+    const move=ev=>{ let at=Math.max(0, origAt+(ev.clientX-startX)/pxSec); blk.style.left=(at*pxSec)+'px'; };
+    const up=ev=>{ let at=Math.max(0, origAt+(ev.clientX-startX)/pxSec);
+      const sStart=snapVal(at), sEnd=Math.max(0, snapVal(at+region)-region);   // pega inicio o final, lo más cercano
+      at=(Math.abs(at-sStart)<=Math.abs(at-sEnd))?sStart:sEnd;
+      l.startAt=at; detach(); persistBlock(); };
+    function detach(){ blk.removeEventListener('pointermove',move); blk.removeEventListener('pointerup',up); blk.removeEventListener('pointercancel',up); }
     blk.addEventListener('pointermove',move); blk.addEventListener('pointerup',up); blk.addEventListener('pointercancel',up);
+  });
+  // ----- RECORTAR borde IZQUIERDO -----
+  const hl=blk.querySelector('.bl-hl'); if(hl) hl.addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation();
+    try{hl.setPointerCapture(e.pointerId);}catch(_){}
+    const T0=layerTrim(l), origStart=(l.startAt||0), origTs=T0.ts, endAbs=origTs+T0.region, startX=e.clientX;
+    const calc=cx=>{ let st=Math.max(0, origStart+(cx-startX)/pxSec); return st; };
+    const apply=(st,doSnap)=>{ if(doSnap) st=snapVal(st); let ts=origTs+(st-origStart); ts=Math.max(0, Math.min(ts, endAbs-0.05));
+      st=origStart+(ts-origTs); const region=endAbs-ts; blk.style.left=(st*pxSec)+'px'; blk.style.width=Math.max(20,region*pxSec)+'px'; return {st,ts,region}; };
+    const move=ev=>apply(calc(ev.clientX),false);
+    const up=ev=>{ const r=apply(calc(ev.clientX),true); l.startAt=Math.max(0,r.st); l.trimStart=r.ts; l.trimEnd=r.ts+r.region; detachH(); persistBlock(); };
+    function detachH(){ hl.removeEventListener('pointermove',move); hl.removeEventListener('pointerup',up); hl.removeEventListener('pointercancel',up); }
+    hl.addEventListener('pointermove',move); hl.addEventListener('pointerup',up); hl.addEventListener('pointercancel',up);
+  });
+  // ----- RECORTAR borde DERECHO -----
+  const hr=blk.querySelector('.bl-hr'); if(hr) hr.addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation();
+    try{hr.setPointerCapture(e.pointerId);}catch(_){}
+    const T0=layerTrim(l), origStart=(l.startAt||0), origTs=T0.ts, origEndAbs=origStart+T0.region, maxRegion=full()-origTs, startX=e.clientX;
+    const calc=cx=>Math.max(origStart+0.05, origEndAbs+(cx-startX)/pxSec);
+    const apply=(endT,doSnap)=>{ if(doSnap) endT=snapVal(endT); let region=Math.min(Math.max(0.05,endT-origStart), maxRegion); blk.style.width=Math.max(20,region*pxSec)+'px'; return region; };
+    const move=ev=>apply(calc(ev.clientX),false);
+    const up=ev=>{ const region=apply(calc(ev.clientX),true); l.trimStart=origTs; l.trimEnd=origTs+region; detachH(); persistBlock(); };
+    function detachH(){ hr.removeEventListener('pointermove',move); hr.removeEventListener('pointerup',up); hr.removeEventListener('pointercancel',up); }
+    hr.addEventListener('pointermove',move); hr.addEventListener('pointerup',up); hr.addEventListener('pointercancel',up);
   });
 }
 
