@@ -23,6 +23,8 @@
     --good:#68C39A;
     --shadow:0 10px 30px rgba(0,0,0,.45);
     --r-lg:22px; --r-md:16px; --r-sm:11px;
+    --accent-grad:linear-gradient(180deg,#F0B354,#E3982F);
+    --card-shadow:0 1px 0 rgba(255,255,255,.04) inset, 0 10px 22px -16px rgba(0,0,0,.75);
     --app-max:480px;
     --host-pad:0px;
     --f-display:"Bricolage Grotesque", system-ui, sans-serif;
@@ -37,6 +39,8 @@
     --rec:#C93B30; --rec-soft:#f6ddd9;
     --good:#3f9e73;
     --shadow:0 12px 30px rgba(80,60,20,.16);
+    --accent-grad:linear-gradient(180deg,#C98A28,#B0731A);
+    --card-shadow:0 1px 0 rgba(255,255,255,.7) inset, 0 10px 22px -16px rgba(120,90,30,.22);
   }
   :root[data-theme="dark"]{
     --ground:#14110E; --surface:#1E1A15; --surface-2:#2A251E; --line:#3A342B;
@@ -44,6 +48,8 @@
     --accent:#E8A33D; --accent-soft:#3a2f1c; --accent-ink:#1a1206;
     --rec:#E2483D; --rec-soft:#3a1a17; --good:#68C39A;
     --shadow:0 10px 30px rgba(0,0,0,.45);
+    --accent-grad:linear-gradient(180deg,#F0B354,#E3982F);
+    --card-shadow:0 1px 0 rgba(255,255,255,.04) inset, 0 10px 22px -16px rgba(0,0,0,.75);
   }
 
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
@@ -102,16 +108,17 @@
   .eyebrow{font-family:var(--f-mono); font-size:11px; letter-spacing:.22em; text-transform:uppercase;
     color:var(--faint); margin:0 0 6px}
   .list-head h2{font-family:var(--f-display); font-weight:800; font-size:27px; margin:0; line-height:1.05;
-    text-wrap:balance}
+    letter-spacing:-.015em; text-wrap:balance}
   .list-head p{color:var(--muted); font-size:14px; margin:8px 0 0}
 
   .projects{display:flex; flex-direction:column; gap:10px; padding:14px 14px calc(120px + var(--host-pad))}
   .pcard{
     display:flex; align-items:center; gap:14px; text-align:left; width:100%;
     background:var(--surface); border:1px solid var(--line); border-radius:var(--r-md);
-    padding:14px 15px; transition:transform .08s ease, border-color .15s ease;
+    padding:14px 15px; box-shadow:var(--card-shadow);
+    transition:transform .12s ease, border-color .15s ease, box-shadow .15s ease;
   }
-  .pcard:hover{border-color:var(--accent)}
+  .pcard:hover{border-color:var(--accent); transform:translateY(-1px)}
   .pcard:active{transform:scale(.99)}
   .pcard .thumb{
     width:46px; height:46px; border-radius:12px; flex:none; display:grid; place-items:center;
@@ -119,7 +126,7 @@
     border:1px solid var(--line); color:var(--accent);
   }
   .pcard .meta{flex:1; min-width:0}
-  .pcard .meta .name{font-family:var(--f-display); font-weight:700; font-size:17px;
+  .pcard .meta .name{font-family:var(--f-display); font-weight:700; font-size:17px; letter-spacing:-.01em;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .pcard .meta .sub{font-family:var(--f-mono); font-size:11px; color:var(--muted); margin-top:3px;
     letter-spacing:.04em; display:flex; gap:10px}
@@ -138,7 +145,7 @@
     display:flex; z-index:6;
   }
   .fab button{
-    flex:1; height:54px; border-radius:16px; background:var(--accent); color:var(--accent-ink);
+    flex:1; height:54px; border-radius:16px; background:var(--accent-grad); color:var(--accent-ink);
     font-family:var(--f-display); font-weight:800; font-size:16px; letter-spacing:.02em;
     display:flex; align-items:center; justify-content:center; gap:9px;
     box-shadow:0 8px 22px -6px var(--accent);
@@ -149,7 +156,7 @@
   .proj-head{padding:16px 18px 4px}
   .proj-title-row{display:flex; align-items:flex-start; gap:8px}
   .proj-title{font-family:var(--f-display); font-weight:800; font-size:24px; margin:0; line-height:1.08;
-    background:none; padding:2px 0; flex:1; text-wrap:balance}
+    letter-spacing:-.015em; background:none; padding:2px 0; flex:1; text-wrap:balance}
   .proj-title:hover{color:var(--accent)}
   .proj-sub{font-family:var(--f-mono); font-size:11px; color:var(--muted); letter-spacing:.06em;
     margin-top:6px; display:flex; gap:12px}
@@ -158,12 +165,13 @@
   .rack{
     margin:14px 14px 0; background:var(--surface); border:1px solid var(--line);
     border-radius:var(--r-md); padding:12px 14px; display:flex; align-items:center; gap:12px;
+    box-shadow:var(--card-shadow);
   }
   .metro-toggle{
     width:52px; height:52px; border-radius:14px; flex:none; display:grid; place-items:center;
     border:1px solid var(--line); background:var(--surface-2); color:var(--muted); position:relative;
   }
-  .metro-toggle.on{color:var(--accent-ink); background:var(--accent); border-color:var(--accent)}
+  .metro-toggle.on{color:var(--accent-ink); background:var(--accent-grad); border-color:var(--accent)}
   .metro-toggle .lbl{position:absolute; bottom:4px; font-family:var(--f-mono); font-size:8px;
     letter-spacing:.1em}
   .bpm-block{flex:1; min-width:0}
@@ -185,8 +193,10 @@
   /* control chips (mic + modo) */
   .ctrl-row{display:flex; gap:9px; padding:12px 14px 0}
   .chip{flex:1; display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--line);
-    border-radius:var(--r-md); padding:10px 11px; text-align:left; min-width:0}
+    border-radius:var(--r-md); padding:10px 11px; text-align:left; min-width:0; box-shadow:var(--card-shadow);
+    transition:border-color .15s ease, transform .1s ease}
   .chip:hover{border-color:var(--accent)}
+  .chip:active{transform:scale(.985)}
   .chip .ci{width:32px; height:32px; border-radius:9px; flex:none; display:grid; place-items:center;
     background:var(--surface-2); color:var(--accent)}
   .chip .cx{min-width:0; flex:1}
@@ -231,14 +241,15 @@
   .layers-head .t{font-family:var(--f-mono); font-size:11px; letter-spacing:.2em; text-transform:uppercase;
     color:var(--faint)}
   .playall{display:flex; align-items:center; gap:7px; font-weight:600; font-size:13px; color:var(--accent);
-    padding:6px 10px; border-radius:10px; border:1px solid var(--line)}
+    padding:6px 10px; border-radius:10px; border:1px solid var(--line); transition:background .15s ease, transform .1s ease}
   .playall:hover{background:var(--accent-soft)}
+  .playall:active{transform:scale(.96)}
   .playall[disabled]{opacity:.4; pointer-events:none}
 
   .layers{display:flex; flex-direction:column; gap:9px; padding:0 14px calc(190px + var(--host-pad))}
   .layer{
     display:flex; flex-direction:column; gap:9px; background:var(--surface); border:1px solid var(--line);
-    border-radius:var(--r-md); padding:11px 12px;
+    border-radius:var(--r-md); padding:11px 12px; box-shadow:var(--card-shadow);
   }
   .layer .lrow{display:flex; align-items:center; gap:12px}
   .layer.muted{opacity:.5}
@@ -250,18 +261,21 @@
   .volrange::-moz-range-thumb{width:14px; height:14px; border-radius:50%; background:var(--accent); border:none; cursor:pointer}
   .sec-actions{display:flex; gap:8px; padding:2px 14px 2px}
   .sec-actions button{flex:1; display:flex; align-items:center; justify-content:center; gap:7px; height:38px;
-    border-radius:12px; border:1px solid var(--line); background:var(--surface); color:var(--text); font-weight:600; font-size:13px}
+    border-radius:12px; border:1px solid var(--line); background:var(--surface); color:var(--text); font-weight:600; font-size:13px;
+    box-shadow:var(--card-shadow); transition:border-color .15s ease, transform .1s ease}
   .sec-actions button:hover{border-color:var(--accent)}
+  .sec-actions button:active{transform:scale(.98)}
   .sec-actions button[disabled]{opacity:.4; pointer-events:none}
   .lh-actions{display:flex; align-items:center; gap:8px}
   .loopbtn{display:flex; align-items:center; justify-content:center; width:36px; height:32px; border-radius:10px;
-    border:1px solid var(--line); color:var(--muted)}
-  .loopbtn.on{color:var(--accent-ink); background:var(--accent); border-color:var(--accent)}
+    border:1px solid var(--line); color:var(--muted); transition:transform .1s ease, background .15s ease, color .15s ease}
+  .loopbtn:active{transform:scale(.94)}
+  .loopbtn.on{color:var(--accent-ink); background:var(--accent-grad); border-color:var(--accent)}
   .layer .lplay{
     width:42px; height:42px; border-radius:12px; flex:none; display:grid; place-items:center;
     background:var(--surface-2); border:1px solid var(--line); color:var(--text);
   }
-  .layer .lplay.playing{background:var(--accent); color:var(--accent-ink); border-color:var(--accent)}
+  .layer .lplay.playing{background:var(--accent-grad); color:var(--accent-ink); border-color:var(--accent)}
   .layer .lmeta{flex:1; min-width:0}
   .layer .lname{font-weight:600; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer}
   .layer .lname:active{color:var(--accent)}
@@ -321,13 +335,15 @@
 
   .recbtn{
     width:82px; height:82px; border-radius:50%; flex:none; position:relative;
-    background:var(--surface); border:2px solid var(--line);
+    background:radial-gradient(130% 130% at 50% 26%, var(--surface-2), var(--surface)); border:2px solid var(--line);
     display:grid; place-items:center; transition:transform .1s ease;
-    box-shadow:0 8px 26px -6px rgba(0,0,0,.5);
+    box-shadow:0 10px 28px -8px rgba(0,0,0,.55), 0 1px 0 rgba(255,255,255,.05) inset;
     touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
   }
   .recbtn:active{transform:scale(.96)}
-  .recbtn .core{width:34px; height:34px; border-radius:50%; background:var(--rec); transition:all .18s ease}
+  .recbtn .core{width:34px; height:34px; border-radius:50%;
+    background:radial-gradient(circle at 50% 32%, #F0655B, var(--rec));
+    box-shadow:0 2px 9px -1px rgba(226,72,61,.5); transition:all .18s ease}
   .recbtn.armed{border-color:var(--accent)}
   .recbtn.recording{border-color:var(--rec)}
   .recbtn.recording .core{width:26px; height:26px; border-radius:7px}
