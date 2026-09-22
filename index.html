@@ -25,11 +25,12 @@
     --r-lg:22px; --r-md:16px; --r-sm:11px;
     --accent-grad:linear-gradient(180deg,#F0B354,#E3982F);
     --card-shadow:0 1px 0 rgba(255,255,255,.04) inset, 0 10px 22px -16px rgba(0,0,0,.75);
+    --gap-btn:8px;
     --app-max:480px;
     --host-pad:0px;
-    --f-display:"Bricolage Grotesque", system-ui, sans-serif;
+    --f-display:"Hanken Grotesk", system-ui, sans-serif;
     --f-body:"Hanken Grotesk", system-ui, sans-serif;
-    --f-mono:"Space Mono", ui-monospace, monospace;
+    --f-mono:"Hanken Grotesk", system-ui, sans-serif;
   }
   /* Light theme */
   :root[data-theme="light"]{
@@ -178,7 +179,7 @@
   .bpm-row{display:flex; align-items:baseline; gap:8px}
   .bpm-num{font-family:var(--f-mono); font-weight:700; font-size:30px; line-height:1; font-variant-numeric:tabular-nums}
   .bpm-unit{font-family:var(--f-mono); font-size:11px; color:var(--muted); letter-spacing:.14em}
-  .bpm-ctrls{display:flex; gap:6px; margin-top:8px}
+  .bpm-ctrls{display:flex; gap:var(--gap-btn); margin-top:8px}
   .bpm-ctrls button{
     height:30px; min-width:34px; padding:0 8px; border-radius:9px; border:1px solid var(--line);
     background:var(--surface-2); color:var(--text); font-family:var(--f-mono); font-weight:700; font-size:13px;
@@ -191,7 +192,7 @@
   .beatdots i.hit.one{background:var(--rec)}
 
   /* control chips (mic + modo) */
-  .ctrl-row{display:flex; gap:9px; padding:12px 14px 0}
+  .ctrl-row{display:flex; gap:var(--gap-btn); padding:12px 14px 0}
   .chip{flex:1; display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--line);
     border-radius:var(--r-md); padding:10px 11px; text-align:left; min-width:0; box-shadow:var(--card-shadow);
     transition:border-color .15s ease, transform .1s ease}
@@ -259,14 +260,14 @@
   .volrange{-webkit-appearance:none; appearance:none; flex:1; height:4px; border-radius:3px; background:var(--surface-2); outline:none}
   .volrange::-webkit-slider-thumb{-webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--accent); cursor:pointer; border:2px solid var(--surface)}
   .volrange::-moz-range-thumb{width:14px; height:14px; border-radius:50%; background:var(--accent); border:none; cursor:pointer}
-  .sec-actions{display:flex; gap:8px; padding:2px 14px 2px}
+  .sec-actions{display:flex; gap:var(--gap-btn); padding:2px 14px 2px}
   .sec-actions button{flex:1; display:flex; align-items:center; justify-content:center; gap:7px; height:38px;
     border-radius:12px; border:1px solid var(--line); background:var(--surface); color:var(--text); font-weight:600; font-size:13px;
     box-shadow:var(--card-shadow); transition:border-color .15s ease, transform .1s ease}
   .sec-actions button:hover{border-color:var(--accent)}
   .sec-actions button:active{transform:scale(.98)}
   .sec-actions button[disabled]{opacity:.4; pointer-events:none}
-  .lh-actions{display:flex; align-items:center; gap:8px}
+  .lh-actions{display:flex; align-items:center; gap:var(--gap-btn)}
   .loopbtn{display:flex; align-items:center; justify-content:center; width:36px; height:32px; border-radius:10px;
     border:1px solid var(--line); color:var(--muted); transition:transform .1s ease, background .15s ease, color .15s ease}
   .loopbtn:active{transform:scale(.94)}
@@ -281,7 +282,7 @@
   .layer .lname:active{color:var(--accent)}
   .layer .ltime{font-family:var(--f-mono); font-size:11px; color:var(--muted); margin-top:2px;
     font-variant-numeric:tabular-nums}
-  .layer .lctrls{display:flex; gap:2px; flex:none}
+  .layer .lctrls{display:flex; gap:var(--gap-btn); flex:none}
   .layer .lctrls button{width:34px; height:34px; border-radius:9px; display:grid; place-items:center; color:var(--muted)}
   .layer .lctrls button:hover{background:var(--surface-2); color:var(--text)}
   .layer .lctrls button.active{color:var(--accent)}
@@ -370,7 +371,7 @@
     padding:13px 14px; color:var(--text); font-family:var(--f-body); font-size:16px; margin-bottom:16px;
   }
   .sheet input:focus{outline:none; border-color:var(--accent)}
-  .sheet-actions{display:flex; gap:10px}
+  .sheet-actions{display:flex; gap:var(--gap-btn)}
   .sheet-actions button{flex:1; height:50px; border-radius:14px; font-weight:700; font-size:15px; font-family:var(--f-body)}
   .btn-ghost{background:var(--surface-2); color:var(--text); border:1px solid var(--line)}
   .btn-primary{background:var(--accent); color:var(--accent-ink)}
