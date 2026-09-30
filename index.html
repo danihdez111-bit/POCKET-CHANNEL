@@ -202,6 +202,14 @@
   .chip .ck{display:block; font-size:10px; font-weight:600; letter-spacing:.01em; color:var(--faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .chip .cv{display:block; font-weight:700; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:3px}
   .chip .cc{color:var(--faint); flex:none}
+  .chip.on{border-color:var(--accent)}
+  .chip.on .ci{background:var(--accent-grad); color:var(--accent-ink)}
+  .chip.on .cv{color:var(--accent)}
+  .ctrl-row-2{padding-top:8px}
+  .switch{width:40px; height:23px; border-radius:12px; background:var(--surface-2); border:1px solid var(--line); position:relative; display:block; transition:background .15s ease}
+  .switch i{position:absolute; top:2px; left:2px; width:17px; height:17px; border-radius:50%; background:var(--muted); transition:left .15s ease, background .15s ease}
+  .chip.on .switch{background:var(--accent-grad); border-color:var(--accent)}
+  .chip.on .switch i{left:19px; background:var(--accent-ink)}
 
   /* opciones tipo radio en las hojas */
   .opt{display:flex; align-items:flex-start; gap:12px; width:100%; text-align:left; padding:13px 14px;
@@ -257,6 +265,13 @@
   .volrange{-webkit-appearance:none; appearance:none; flex:1; height:4px; border-radius:3px; background:var(--surface-2); outline:none}
   .volrange::-webkit-slider-thumb{-webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--accent); cursor:pointer; border:2px solid var(--surface)}
   .volrange::-moz-range-thumb{width:14px; height:14px; border-radius:50%; background:var(--accent); border:none; cursor:pointer}
+  .lnr{display:flex; align-items:center; gap:9px; padding:0 2px}
+  .lnr .nlbl{font-size:10px; font-weight:600; color:var(--faint); flex:none; width:38px; letter-spacing:.01em}
+  .lnr .nrval{font-family:var(--f-mono); font-size:10px; color:var(--faint); width:30px; text-align:right; flex:none}
+  .lnr.off .nrval{opacity:.55}
+  .nrrange{-webkit-appearance:none; appearance:none; flex:1; height:4px; border-radius:3px; background:var(--surface-2); outline:none}
+  .nrrange::-webkit-slider-thumb{-webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--good); cursor:pointer; border:2px solid var(--surface)}
+  .nrrange::-moz-range-thumb{width:14px; height:14px; border-radius:50%; background:var(--good); border:none; cursor:pointer}
   .sec-actions{display:flex; gap:var(--gap-btn); padding:2px 14px 2px}
   .sec-actions button{flex:1; display:flex; align-items:center; justify-content:center; gap:7px; height:38px;
     border-radius:12px; border:1px solid var(--line); background:var(--surface); color:var(--text); font-weight:600; font-size:13px;
@@ -469,6 +484,13 @@
           <span class="cc"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
         </button>
       </div>
+      <div class="ctrl-row ctrl-row-2">
+        <button class="chip" id="noiseChip" aria-pressed="false" title="Limpia el ruido de fondo mientras grabas">
+          <span class="ci"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h18l-7 8v7l-4 2v-9L3 4z"/></svg></span>
+          <span class="cx"><span class="ck">Modo ruido · limpia el micro al grabar</span><span class="cv" id="noiseChipVal">No</span></span>
+          <span class="cc" id="noiseState"><span class="switch"><i></i></span></span>
+        </button>
+      </div>
 
       <div class="layers-head">
         <span class="t">Capas</span>
@@ -503,7 +525,7 @@
     <div class="dock">
       <div class="beat-pulse" id="beatPulse"><span class="bp"></span></div>
       <div class="rec-status">
-        <span class="live" id="liveTag">GRABANDO</span>
+        <span class="live" id="liveTag">Grabando</span>
         <span class="time" id="recTime" hidden>00:00</span>
         <div class="level" id="level"><i id="levelBar"></i></div>
         <span id="recIdle">Listo para grabar</span>
@@ -574,6 +596,7 @@ let metroOn=false;
 let audioCtx=null;
 let monitorMode='visual';   // 'visual' (sin cascos, guía visual) | 'audible' (con cascos, escuchar)
 let selectedMic='auto';     // 'auto' o deviceId concreto
+let noiseMode=false;        // 'Modo ruido': limpieza del micro al grabar (supresión de ruido del navegador)
 let micList=[];
 let holdActive=false, discardRec=false;   // grabar manteniendo pulsado (estilo WhatsApp)
 let loopAll=false;                         // reproducir/grabar sobre bucle
@@ -632,13 +655,49 @@ function trimFor(l, fullDur){ const full=fullDur||l.dur||0; const ts=Math.max(0,
   let te=(l.trimEnd!=null?l.trimEnd:full); te=Math.min(Math.max(te,ts),full);
   const trimmed=((l.trimStart||0)>0)||(l.trimEnd!=null); return {ts:(te>ts?ts:0), region:(te>ts?te-ts:full), trimmed}; }
 async function ensureBuf(l){ if(l._buf) return l._buf; const ac=ctx(); const arr=await l.blob.arrayBuffer(); l._buf=await ac.decodeAudioData(arr); return l._buf; }
+/* reducción de ruido no destructiva por capa: paso-alto + puerta de ruido (silencia los huecos para que al apilar capas no se sumen los ruidos de fondo). Se cachea por intensidad. */
+function nrProcess(buf, nr){
+  const sr=buf.sampleRate, n=buf.length, ch=buf.numberOfChannels;
+  if(n<8) return buf;
+  const t=Math.max(0,Math.min(1,nr/100));
+  const hpFc=55+95*t;                       // paso-alto 55→150 Hz (quita retumbe/graves de sala)
+  const thrK=1.7+5.0*t;                      // cuánto por encima del ruido de fondo abre la puerta
+  const floorG=Math.max(0,0.32*(1-1.25*t));  // cuánto se atenúan los huecos (0.32→0 = silencio total)
+  const ac=ctx(); const ob=ac.createBuffer(ch,n,sr);
+  const dt=1/sr, RC=1/(2*Math.PI*hpFc), a=RC/(RC+dt);
+  const hp=[]; for(let c=0;c<ch;c++){ const x=buf.getChannelData(c), y=new Float32Array(n);
+    let py=0,px=0; for(let i=0;i<n;i++){ const cur=x[i]; y[i]=a*(py+cur-px); py=y[i]; px=cur; } hp.push(y); }
+  const env=new Float32Array(n);
+  const aAtk=Math.exp(-1/(sr*0.005)), aRel=Math.exp(-1/(sr*0.10));
+  let e=0; for(let i=0;i<n;i++){ let m=0; for(let c=0;c<ch;c++){ const v=Math.abs(hp[c][i]); if(v>m)m=v; }
+    if(m>e) e=aAtk*e+(1-aAtk)*m; else e=aRel*e+(1-aRel)*m; env[i]=e; }
+  const step=Math.max(1,(sr/200)|0), samp=[];
+  for(let i=0;i<n;i+=step) samp.push(env[i]);
+  samp.sort((p,q)=>p-q); const floorNoise=samp[Math.floor(samp.length*0.15)]||0;
+  const thr=Math.max(floorNoise*thrK, 0.0008);
+  const oc=[]; for(let c=0;c<ch;c++) oc.push(ob.getChannelData(c));
+  const gAtk=Math.exp(-1/(sr*0.004)), gRel=Math.exp(-1/(sr*0.14));
+  let g=floorG;
+  for(let i=0;i<n;i++){ const want= env[i]>thr ? 1 : floorG;
+    if(want>g) g=gAtk*g+(1-gAtk)*want; else g=gRel*g+(1-gRel)*want;
+    for(let c=0;c<ch;c++) oc[c][i]=hp[c][i]*g;
+  }
+  return ob;
+}
+async function bufForLayer(l){
+  const b=await ensureBuf(l); const nr=l.nr||0;
+  if(nr<=0) return b;
+  if(l._nrBuf && l._nrKey===nr) return l._nrBuf;
+  try{ l._nrBuf=nrProcess(b,nr); l._nrKey=nr; }catch(e){ return b; }
+  return l._nrBuf;
+}
 async function playLayers(layers, onEndAll){
   stopLayers();
   const ac=ctx(); const total=layers.length;
   if(total===0){ if(onEndAll) onEndAll(); return; }
   const myToken=playToken;
   let bufs;
-  try{ bufs=await Promise.all(layers.map(l=>ensureBuf(l).then(b=>({l,b})).catch(()=>({l,b:null})))); }
+  try{ bufs=await Promise.all(layers.map(l=>bufForLayer(l).then(b=>({l,b})).catch(()=>({l,b:null})))); }
   catch(e){ if(onEndAll) onEndAll(); return; }
   if(myToken!==playToken) return;                       // cancelado mientras descodificaba
   let ended=0; const startT=ac.currentTime+0.04;
@@ -678,19 +737,25 @@ function stopLayers(){
 
 /* ---------- grabación ---------- */
 let stream=null, recorder=null, chunks=[], recStart=0, recTimer=null, analyser=null, levelRAF=null, recState='idle';
+let streamNoise=null;   // con qué ajuste de 'Modo ruido' se abrió el stream actual
 async function getStream(force){
-  if(stream && !force) return stream;
+  const want=!!noiseMode;
+  if(stream && !force && streamNoise===want) return stream;
   if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
-  const audio={echoCancellation:false, noiseSuppression:false, autoGainControl:false};
+  const base = want
+    ? {echoCancellation:true, noiseSuppression:true, autoGainControl:true}    // limpia el fondo del micro
+    : {echoCancellation:false, noiseSuppression:false, autoGainControl:false}; // captación fiel
+  const audio=Object.assign({}, base);
   if(selectedMic && selectedMic!=='auto') audio.deviceId={exact:selectedMic};
   try{
     stream=await navigator.mediaDevices.getUserMedia({audio});
   }catch(e){
     if(selectedMic!=='auto'){ // el micro elegido ya no está: volvemos a automático
       selectedMic='auto'; savePrefs(); updateChips();
-      stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+      stream=await navigator.mediaDevices.getUserMedia({audio:base});
     } else throw e;
   }
+  streamNoise=want;
   return stream;
 }
 async function loadMics(){
@@ -781,7 +846,7 @@ function onRecStop(){
   const type=(recorder&&recorder.mimeType)||'audio/webm';
   const blob=new Blob(chunks,{type});
   const dur=(Date.now()-recStart)/1000;
-  const layer={id:uid(), name:'Capa '+(current.layers.length+1), blob, dur, createdAt:Date.now(), muted:false};
+  const layer={id:uid(), name:'Capa '+(current.layers.length+1), blob, dur, createdAt:Date.now(), muted:false, volume:1, nr:30};
   current.layers.push(layer);
   current.updatedAt=Date.now();
   DB.put(clone(current)).then(()=>{ renderLayers(); renderProjectSub(); if(timelineOn) renderTimeline(); });
@@ -797,7 +862,7 @@ function resetDockUI(){
 
 /* blobs no se pueden pasar a IndexedDB dentro de proxies raros; clon simple */
 function clone(p){ return {id:p.id, name:p.name, bpm:p.bpm, createdAt:p.createdAt, updatedAt:p.updatedAt,
-  layers:p.layers.map(l=>({id:l.id,name:l.name,blob:l.blob,dur:l.dur,createdAt:l.createdAt,muted:l.muted,volume:(l.volume==null?1:l.volume),imported:!!l.imported,trimStart:(l.trimStart||0),trimEnd:(l.trimEnd==null?null:l.trimEnd),startAt:(l.startAt||0)}))}; }
+  layers:p.layers.map(l=>({id:l.id,name:l.name,blob:l.blob,dur:l.dur,createdAt:l.createdAt,muted:l.muted,volume:(l.volume==null?1:l.volume),nr:(l.nr||0),imported:!!l.imported,trimStart:(l.trimStart||0),trimEnd:(l.trimEnd==null?null:l.trimEnd),startAt:(l.startAt||0)}))}; }
 
 /* ---------- navegación ---------- */
 function show(which){
@@ -875,6 +940,11 @@ function renderLayers(){
         '<span class="vico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>'+
         '<input type="range" class="volrange" min="0" max="100" value="'+Math.round(vol*100)+'" aria-label="Volumen de la capa">'+
         '<span class="volval">'+Math.round(vol*100)+'</span>'+
+      '</div>'+
+      '<div class="lnr'+((l.nr||0)>0?'':' off')+'">'+
+        '<span class="nlbl">Ruido</span>'+
+        '<input type="range" class="nrrange" min="0" max="100" value="'+(l.nr||0)+'" aria-label="Reducir ruido de fondo de la capa">'+
+        '<span class="nrval">'+((l.nr||0)>0?(l.nr||0):'Off')+'</span>'+
       '</div>';
     row.querySelector('.lname').textContent=l.name;
     row.querySelector('.lname').onclick=()=>renameLayer(l);
@@ -886,6 +956,10 @@ function renderLayers(){
     const vr=row.querySelector('.volrange'), vv=row.querySelector('.volval');
     vr.oninput=()=>{ l.volume=vr.value/100; vv.textContent=vr.value; const n=activeNodes.find(x=>x._lid===l.id); if(n && n._g && audioCtx){ try{ n._g.gain.setTargetAtTime(l.volume, audioCtx.currentTime, 0.01); }catch(e){} } };
     vr.onchange=()=>{ current.updatedAt=Date.now(); DB.put(clone(current)); };
+    const nr=row.querySelector('.nrrange'), nv=row.querySelector('.nrval'), nrow=row.querySelector('.lnr');
+    nr.oninput=()=>{ const v=+nr.value; l.nr=v; nv.textContent=v>0?v:'Off'; nrow.classList.toggle('off',v<=0); };
+    nr.onchange=()=>{ l._nrKey=null; l._nrBuf=null; current.updatedAt=Date.now(); DB.put(clone(current));
+      if(layerPlaying===l.id){ stopLayers(); const lp=l; playLayers([lp], ()=>{ layerPlaying=null; refreshLayerPlayIcons(); playClock=null; }); layerPlaying=lp.id; refreshLayerPlayIcons(); } };
     box.appendChild(row);
   });
   refreshLayerPlayIcons();
@@ -1054,7 +1128,7 @@ async function downloadMix(){
     const ac=ctx(); const sr=ac.sampleRate;
     const parts=[];
     for(const l of layers){
-      const buf=await ensureBuf(l);
+      const buf=await bufForLayer(l);
       const ts=Math.min(Math.max(0,l.trimStart||0), buf.duration);
       let te=(l.trimEnd!=null? l.trimEnd : buf.duration); te=Math.min(Math.max(te,ts), buf.duration);
       const d=Math.max(0, (te>ts? te-ts : buf.duration));
@@ -1267,9 +1341,11 @@ function monitorSheet(){
 function updateChips(){
   const mv=$('#micChipVal'); if(mv) mv.textContent = selectedMic==='auto' ? 'Automático' : (micLabelById(selectedMic)||'Micro elegido');
   const nv=$('#monChipVal'); if(nv) nv.textContent = monitorMode==='visual' ? 'Guía visual' : 'Escuchar (cascos)';
+  const zv=$('#noiseChipVal'); if(zv) zv.textContent = noiseMode ? 'Sí' : 'No';
+  const zc=$('#noiseChip'); if(zc){ zc.classList.toggle('on', noiseMode); zc.setAttribute('aria-pressed', noiseMode?'true':'false'); }
 }
-function savePrefs(){ try{ localStorage.setItem('pc-monitor',monitorMode); localStorage.setItem('pc-mic',selectedMic); }catch(e){} }
-function loadPrefs(){ try{ const m=localStorage.getItem('pc-monitor'); if(m)monitorMode=m; const c=localStorage.getItem('pc-mic'); if(c)selectedMic=c; }catch(e){} }
+function savePrefs(){ try{ localStorage.setItem('pc-monitor',monitorMode); localStorage.setItem('pc-mic',selectedMic); localStorage.setItem('pc-noise', noiseMode?'1':'0'); }catch(e){} }
+function loadPrefs(){ try{ const m=localStorage.getItem('pc-monitor'); if(m)monitorMode=m; const c=localStorage.getItem('pc-mic'); if(c)selectedMic=c; const z=localStorage.getItem('pc-noise'); if(z!=null) noiseMode=(z==='1'); }catch(e){} }
 
 /* ---------- metrónomo / bpm ---------- */
 function setBpm(v){ metro.bpm=Math.max(40,Math.min(240,v)); $('#bpmNum').textContent=metro.bpm;
@@ -1312,6 +1388,8 @@ $('#projMenuBtn').onclick=projectMenu;
 $('#playAllBtn').onclick=togglePlayAll;
 $('#micChip').onclick=micSheet;
 $('#monChip').onclick=monitorSheet;
+$('#noiseChip').onclick=()=>{ noiseMode=!noiseMode; savePrefs(); updateChips();
+  toast(noiseMode ? 'Modo ruido activado · limpia el fondo del micro al grabar' : 'Modo ruido desactivado · captación fiel'); };
 $('#loopBtn').onclick=()=>{ loopAll=!loopAll; const b=$('#loopBtn'); b.classList.toggle('on',loopAll); b.setAttribute('aria-pressed',loopAll?'true':'false'); toast(loopAll?'Bucle activado (para grabar encima)':'Bucle desactivado'); };
 $('#viewBtn').onclick=toggleView;
 $('#mixBtn').onclick=downloadMix;
